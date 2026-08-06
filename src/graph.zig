@@ -7,11 +7,13 @@ pub fn Graph(T: type) type {
 
 pub fn GraphWithContext(T: type, TContext: type) type {
     return struct {
+        context: TContext,
         alloc: std.mem.Allocator,
         nodes: std.HashMap(T, std.ArrayList(T), TContext, std.hash_map.default_max_load_percentage),
 
         pub fn init(alloc: std.mem.Allocator) !@This() {
             return @This() {
+                .context = .{},
                 .alloc = alloc,
                 .nodes = .init(alloc),
             };
@@ -85,6 +87,47 @@ test "u32:connect_to_missing_nodes" {
         try g.add(3);
         try testing.expectError(error.MissingFrom, g.connect(4, 3));
     }
+}
+const ConstU8TestContext = struct {
+    pub fn hash(_: @This(), key: []const u8) u64 {
+        var h = std.hash.Wyhash.init(3497);  // <- change the hash algo according to your needs... (WyHash...)
+        h.update(key);
+        return h.final();
+    }
+
+    pub fn eql(_: @This(), a: []const u8, b: []const u8) bool {
+        return std.mem.eql(u8, a, b);
+    }
+};
+fn contains(ctx: anytype, haystack: [][]const u8, needle: []const u8) bool {
+    for (haystack) |item| {
+        if (ctx.eql(needle, item)) return true;
+    }
+    return false;
+}
+
+test "[]const u8:add_node" {
+    var g = try GraphWithContext([]const u8, ConstU8TestContext).init(testing.allocator);
+    defer g.deinit();
+
+    try g.add("hello");
+    try testing.expect(g.nodes.get("hello") != null);
+}
+
+test "[]const u8:connect_nodes" {
+    var g = try GraphWithContext([]const u8, ConstU8TestContext).init(testing.allocator);
+    defer g.deinit();
+
+    try g.add("hello");
+    try g.add("goodbye");
+
+    try testing.expect(g.nodes.contains("hello"));
+    try testing.expect(g.nodes.contains("goodbye"));
+
+    try g.connect("hello", "goodbye");
+    try testing.expect(g.nodes.get("hello") != null);
+    try testing.expect(contains(g.context, g.nodes.get("hello").?.items, "goodbye"));
+    try testing.expect(!contains(g.context, g.nodes.get("goodbye").?.items, "hello"));
 }
 
 test "struct:add_node" {
