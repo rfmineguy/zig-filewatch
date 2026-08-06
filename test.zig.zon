@@ -1,0 +1,39 @@
+.{
+    .watchers = .{
+        .{
+            .patterns = .{ "**/*.zig" },
+            .sequence = .{
+                .{ .action = "build_css" },
+                .{ .action = "build_zig" }
+            }
+        },
+        .{
+            .patterns = .{ "**/*.css" },
+            .sequence = .{
+                .{ .action = "build_css" },
+                .{ .action = "build_zig" }
+            }
+        }
+    },
+    .actions = .{
+        .{
+            .id = "restart",
+            .sequence = .{
+                .{ .shell = "./zig-out/test" }
+            }
+        },
+        .{
+            .id = "build_css",
+            .sequence = .{
+                .{ .shell = "npx @tailwindcss/cli -i ./static/main.css -o ./static/output.css" },
+            }
+        },
+        .{
+            .id = "build_zig",
+            .sequence = .{
+                .{ .shell = "zig build" },
+                .{ .action = "restart" }
+            }
+        }
+    }
+}
