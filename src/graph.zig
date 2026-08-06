@@ -1,11 +1,11 @@
 const std = @import("std");
 const testing = std.testing;
 
-pub fn Graph(comptime T: type) type {
+pub fn Graph(T: type) type {
     return GraphWithContext(T, std.hash_map.AutoContext(T));
 }
 
-pub fn GraphWithContext(comptime T: type, comptime TContext: type) type {
+pub fn GraphWithContext(T: type, TContext: type) type {
     return struct {
         alloc: std.mem.Allocator,
         nodes: std.HashMap(T, std.ArrayList(T), TContext, std.hash_map.default_max_load_percentage),
@@ -28,6 +28,14 @@ pub fn GraphWithContext(comptime T: type, comptime TContext: type) type {
         pub fn add(self: *@This(), v: T) !void {
             try self.nodes.put(v, try .initCapacity(self.alloc, 10));
         }
+
+        pub fn connect(self: *@This(), from: T, to: T) anyerror!void {
+            if (!self.nodes.contains(from)) return error.MissingFrom;
+            if (!self.nodes.contains(to)) return error.MissingTo;
+            if (self.nodes.getPtr(from)) |list| {
+                try list.append(self.alloc, to);
+            }
+        }
     };
 }
 
@@ -42,6 +50,41 @@ test "u32:add_node" {
     try testing.expect(g.nodes.contains(5));
     for (0..3) |i| try testing.expect(!g.nodes.contains(@intCast(i)));
     for (6..10) |i| try testing.expect(!g.nodes.contains(@intCast(i)));
+}
+
+test "u32:connect_nodes" {
+    var g = try Graph(u32).init(testing.allocator);
+    defer g.deinit();
+
+    try g.add(4);
+    try g.add(5);
+
+    try testing.expect(g.nodes.contains(4));
+    try testing.expect(g.nodes.contains(5));
+    for (0..3) |i| try testing.expect(!g.nodes.contains(@intCast(i)));
+    for (6..10) |i| try testing.expect(!g.nodes.contains(@intCast(i)));
+
+    try g.connect(4, 5);
+    try testing.expect(g.nodes.get(4) != null);
+    try testing.expect(std.mem.containsAtLeast(u32, g.nodes.get(4).?.items, 1, &[_]u32{5}));
+    try testing.expect(!std.mem.containsAtLeast(u32, g.nodes.get(5).?.items, 1, &[_]u32{4}));
+}
+
+test "u32:connect_to_missing_nodes" {
+    {
+        var g = try Graph(u32).init(testing.allocator);
+        defer g.deinit();
+
+        try g.add(4);
+        try testing.expectError(error.MissingTo, g.connect(4, 3));
+    }
+    {
+        var g = try Graph(u32).init(testing.allocator);
+        defer g.deinit();
+
+        try g.add(3);
+        try testing.expectError(error.MissingFrom, g.connect(4, 3));
+    }
 }
 
 test "struct:add_node" {
