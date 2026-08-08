@@ -6,7 +6,7 @@ pub const SequenceEntry = union(enum) {
     shell: ?[]const u8,
 };
 
-pub const Watcher = struct {
+pub const WatcherCfg = struct {
     sequence: []SequenceEntry,
     patterns: [][]const u8,
 };
@@ -17,7 +17,7 @@ pub const Action = struct {
 };
 
 pub const Config = struct {
-    watchers: ?[]Watcher,
+    watchers: ?[]WatcherCfg,
     actions: ?[]Action,
     pub fn default() Config {
         return @This() {
