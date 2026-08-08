@@ -34,6 +34,19 @@
                 .{ .shell = "zig build" },
                 .{ .action = "restart" }
             }
+        },
+        .{
+            .id = "id4",
+            .sequence = .{
+                .{ .action = "id5" },
+            }
+        },
+        .{
+            .id = "id5",
+            .sequence = .{
+                .{ .action = "id4" },
+                .{ .action = "build_zig" },
+            }
         }
     }
 }

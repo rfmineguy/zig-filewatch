@@ -11,12 +11,81 @@ pub fn GraphWithContext(T: type, TContext: type) type {
         alloc: std.mem.Allocator,
         nodes: std.HashMap(T, std.ArrayList(T), TContext, std.hash_map.default_max_load_percentage),
 
+        const BFSIterator = struct {
+            graph: *const GraphWithContext(T, TContext),
+            queue: std.ArrayList(T),
+            visited: std.HashMap(T, void, TContext, std.hash_map.default_max_load_percentage),
+            index: u32,
+
+            pub fn init(graph: *const GraphWithContext(T, TContext)) !BFSIterator {
+                return .{
+                    .graph = graph,
+                    .queue = try .initCapacity(graph.alloc, 10),
+                    .visited = .init(graph.alloc),
+                    .index = 0,
+                };
+            }
+
+            pub fn deinit(self: *@This()) void {
+                self.queue.deinit(self.graph.alloc);
+                self.visited.deinit();
+            }
+
+            pub fn next(self: *@This()) !?T {
+                // The end of the iteration
+                if (self.queue.items.len == 0) {
+                    return null;
+                }
+
+                const v = self.queue.pop().?; // ensured to be non null due to prior check
+                if (self.visited.contains(v)) return null;
+                try self.visited.put(v, {});
+                if (self.graph.nodes.get(v)) |connections| {
+                    for (connections.items) |conn| {
+                        if (self.visited.contains(conn)) continue;
+                        try self.queue.append(self.graph.alloc, conn);
+                    }
+                }
+
+                self.index += 1;
+                return v;
+            }
+
+        };
+
         pub fn init(alloc: std.mem.Allocator) !@This() {
             return @This() {
                 .context = .{},
                 .alloc = alloc,
                 .nodes = .init(alloc),
             };
+        }
+
+        pub fn bfs(self: *@This()) !BFSIterator {
+            var it: BFSIterator = try .init(self);
+            var it_ = self.nodes.keyIterator();
+            while (it_.next()) |v| {
+                try it.queue.append(self.alloc, v.*);
+            }
+            return it;
+        }
+
+        pub fn dot(self: *@This(), writer: *std.Io.Writer) !void {
+            var it = try self.bfs();
+            var index: u32 = 0;
+            try writer.print("digraph {{\n", .{});
+            while (try it.next()) |v| : (index += 1) {
+                try writer.print("{s} [label=\"{s}\"]\n", .{v, v});
+                try writer.print("{s} -> {{", .{v});
+                if (self.nodes.get(v)) |v_| {
+                    for (v_.items, 0..) |item, idx| {
+                        try writer.print("{s}", .{item});
+                        if (idx != v_.items.len - 1) try writer.print(",", .{});
+                    }
+                }
+                try writer.print("}}\n", .{});
+            }
+            try writer.print("}}\n", .{});
         }
 
         pub fn deinit(self: *@This()) void {
@@ -88,6 +157,30 @@ test "u32:connect_to_missing_nodes" {
         try testing.expectError(error.MissingFrom, g.connect(4, 3));
     }
 }
+
+test "u32:bfs_iterator" {
+    var g = try Graph(u32).init(testing.allocator);
+    defer g.deinit();
+
+    try g.add(0);
+    try g.add(1);
+    try g.add(2);
+    try g.add(3);
+    try g.add(10);
+
+    // create linear graph
+    try g.connect(0, 1);
+    try g.connect(1, 2);
+    try g.connect(2, 3);
+    try g.connect(1, 10);
+
+    var it = try g.bfs();
+    defer it.deinit();
+    while (try it.next()) |v| {
+        std.debug.print("v={}\n", .{v});
+    }
+}
+
 const ConstU8TestContext = struct {
     pub fn hash(_: @This(), key: []const u8) u64 {
         var h = std.hash.Wyhash.init(3497);  // <- change the hash algo according to your needs... (WyHash...)
