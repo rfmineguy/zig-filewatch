@@ -11,9 +11,12 @@ pub fn GraphWithContext(T: type, TContext: type) type {
         alloc: std.mem.Allocator,
         nodes: std.HashMap(T, std.ArrayList(T), TContext, std.hash_map.default_max_load_percentage),
 
+        const Cycle = struct {
+            elements: std.ArrayList(T),
+        };
         const BFSIterator = struct {
             graph: *const GraphWithContext(T, TContext),
-            queue: std.ArrayList(T),
+            queue: std.Deque(T),
             visited: std.HashMap(T, void, TContext, std.hash_map.default_max_load_percentage),
             index: u32,
 
@@ -33,24 +36,76 @@ pub fn GraphWithContext(T: type, TContext: type) type {
 
             pub fn next(self: *@This()) !?T {
                 // The end of the iteration
-                if (self.queue.items.len == 0) {
+                if (self.queue.len == 0) {
                     return null;
                 }
 
-                const v = self.queue.pop().?; // ensured to be non null due to prior check
+                const v = self.queue.popFront().?; // ensured to be non null due to prior check
                 if (self.visited.contains(v)) return null;
                 try self.visited.put(v, {});
                 if (self.graph.nodes.get(v)) |connections| {
                     for (connections.items) |conn| {
                         if (self.visited.contains(conn)) continue;
-                        try self.queue.append(self.graph.alloc, conn);
+                        try self.queue.pushFront(self.graph.alloc, conn);
                     }
                 }
 
                 self.index += 1;
                 return v;
             }
+        };
 
+        const DFSIterator = struct {
+            graph: *const GraphWithContext(T, TContext),
+            nodes_iterator: std.HashMap(T, std.ArrayList(T), TContext, std.hash_map.default_max_load_percentage).Iterator,
+            stack: std.ArrayList(T),
+            visited: std.HashMap(T, void, TContext, std.hash_map.default_max_load_percentage),
+            index: u32,
+
+            pub fn init(graph: *const GraphWithContext(T, TContext)) !DFSIterator {
+                var it: DFSIterator = .{
+                    .graph = graph,
+                    .nodes_iterator = graph.nodes.iterator(),
+                    .stack = try .initCapacity(graph.alloc, 10),
+                    .visited = .init(graph.alloc),
+                    .index = 0,
+                };
+                var it_ = graph.nodes.iterator();
+                if (it_.next()) |entry| try it.stack.append(graph.alloc, entry.key_ptr.*);
+
+                return it;
+            }
+
+            pub fn deinit(self: *@This()) void {
+                self.stack.deinit(self.graph.alloc);
+                self.visited.deinit();
+            }
+
+            pub fn next(self: *@This()) !?T {
+                while (self.stack.pop()) |v| {
+                    if (self.visited.contains(v)) continue;
+                    try self.visited.put(v, {});
+
+                    if (self.graph.nodes.get(v)) |connections| {
+                        for (connections.items) |conn| {
+                            if (self.visited.contains(conn)) continue;
+                            try self.stack.append(self.graph.alloc, conn);
+                        }
+                    }
+                    self.index += 1;
+                    return v;
+                }
+
+                // Current component is exhausted
+                while (self.nodes_iterator.next()) |entry| {
+                    const v = entry.key_ptr.*;
+                    if (self.visited.contains(v)) continue;
+
+                    try self.stack.append(self.graph.alloc, v);
+                    return self.next();
+                }
+                return null;
+            }
         };
 
         pub fn init(alloc: std.mem.Allocator) !@This() {
@@ -65,9 +120,13 @@ pub fn GraphWithContext(T: type, TContext: type) type {
             var it: BFSIterator = try .init(self);
             var it_ = self.nodes.keyIterator();
             while (it_.next()) |v| {
-                try it.queue.append(self.alloc, v.*);
+                try it.queue.pushFront(self.alloc, v.*);
             }
             return it;
+        }
+
+        pub fn dfs(self: *@This()) !DFSIterator {
+            return try .init(self);
         }
 
         pub fn dot(self: *@This(), writer: *std.Io.Writer) !void {
@@ -75,17 +134,23 @@ pub fn GraphWithContext(T: type, TContext: type) type {
             var index: u32 = 0;
             try writer.print("digraph {{\n", .{});
             while (try it.next()) |v| : (index += 1) {
-                try writer.print("{s} [label=\"{s}\"]\n", .{v, v});
-                try writer.print("{s} -> {{", .{v});
+                try writer.print("{any} [label=\"{any}\"]\n", .{v, v});
+                try writer.print("{any} -> {{", .{v});
                 if (self.nodes.get(v)) |v_| {
                     for (v_.items, 0..) |item, idx| {
-                        try writer.print("{s}", .{item});
+                        try writer.print("{any}", .{item});
                         if (idx != v_.items.len - 1) try writer.print(",", .{});
                     }
                 }
                 try writer.print("}}\n", .{});
             }
             try writer.print("}}\n", .{});
+        }
+
+        //TODO: Implement cycle detection
+        pub fn detectCycles(self: *@This()) ?[]Cycle {
+            _ = self;
+            return null;
         }
 
         pub fn deinit(self: *@This()) void {
@@ -159,6 +224,7 @@ test "u32:connect_to_missing_nodes" {
 }
 
 test "u32:bfs_iterator" {
+    std.debug.print("u32:bfs_iterator\n", .{});
     var g = try Graph(u32).init(testing.allocator);
     defer g.deinit();
 
@@ -176,9 +242,55 @@ test "u32:bfs_iterator" {
 
     var it = try g.bfs();
     defer it.deinit();
-    while (try it.next()) |v| {
-        std.debug.print("v={}\n", .{v});
+    var idx: u32 = 0;
+    while (try it.next()) |v| : (idx += 1) {
+        std.debug.print("{},", .{v});
     }
+    std.debug.print("\n", .{});
+}
+
+test "u32:dfs_iterator" {
+    std.debug.print("u32:dfs_iterator\n", .{});
+    var g = try Graph(u32).init(testing.allocator);
+    defer g.deinit();
+
+    try g.add(0);
+    try g.add(1);
+    try g.add(2);
+    try g.add(3);
+    try g.add(4);
+    try g.add(5);
+    try g.add(6);
+
+    // create binary tree
+    //     A
+    //    / \
+    //   B   C
+    //  / \   \
+    // D   E   F
+    //      \
+    //       G
+    try g.connect(0, 1);
+    try g.connect(0, 2);
+    try g.connect(1, 3);
+    try g.connect(1, 4);
+    try g.connect(2, 5);
+    try g.connect(4, 6);
+
+    // const io = testing.io;
+    // var stdout_buffer: [1024]u8 = undefined;
+    // var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+
+    // try g.dot(&stdout_file_writer.interface);
+    // try stdout_file_writer.flush();
+
+    var it = try g.dfs();
+    defer it.deinit();
+    var idx: u32 = 0;
+    while (try it.next()) |v| : (idx += 1) {
+        std.debug.print("{any},", .{v});
+    }
+    std.debug.print("\n", .{});
 }
 
 const ConstU8TestContext = struct {
