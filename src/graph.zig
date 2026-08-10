@@ -1,8 +1,18 @@
 const std = @import("std");
 const testing = std.testing;
 
-pub fn Graph(T: type) type {
-    return GraphWithContext(T, std.hash_map.AutoContext(T));
+fn Formatted(comptime T: type, comptime Context: type) type {
+    return struct {
+        value: T,
+        context: Context,
+
+        pub fn format(
+            self: @This(),
+            writer: *std.Io.Writer,
+        ) std.Io.Writer.Error!void {
+            try self.context.format(self.value, writer);
+        }
+    };
 }
 
 pub fn GraphWithContext(T: type, TContext: type) type {
@@ -44,11 +54,13 @@ pub fn GraphWithContext(T: type, TContext: type) type {
             var index: u32 = 0;
             try writer.print("digraph {{\n", .{});
             while (try it.next()) |v| : (index += 1) {
-                try writer.print("{any} [label=\"{any}\"]\n", .{v, v});
-                try writer.print("{any} -> {{", .{v});
+                const formatted = Formatted(T, TContext){.value = v, .context = self.context};
+                try writer.print("{f} [label=\"{f}\"]\n", .{formatted, formatted});
+                try writer.print("{f} -> {{", .{formatted});
                 if (self.nodes.get(v)) |v_| {
                     for (v_.items, 0..) |item, idx| {
-                        try writer.print("{any}", .{item});
+                        const formatted2 = Formatted(T, TContext){.value = item, .context = self.context};
+                        try writer.print("{f}", .{formatted2});
                         if (idx != v_.items.len - 1) try writer.print(",", .{});
                     }
                 }
