@@ -106,10 +106,10 @@ pub fn Johnsons(T: type, TContext: type) type {
 
         graph: *const Graph,
         stack: std.ArrayList(T),
-        blocked: std.AutoHashMap(T, void),
+        blocked: std.HashMap(T, void, TContext, std.hash_map.default_max_load_percentage),
 
-        b: std.AutoHashMap(T, std.ArrayList(T)),
-        sub_nodes: std.AutoHashMap(T, void),
+        b: std.HashMap(T, std.ArrayList(T), TContext, std.hash_map.default_max_load_percentage),
+        sub_nodes: std.HashMap(T, void, TContext, std.hash_map.default_max_load_percentage),
 
         pub fn init(graph: *const Graph) @This() {
             return .{
@@ -138,13 +138,13 @@ pub fn Johnsons(T: type, TContext: type) type {
         ) !?std.ArrayList(T) {
             var index: usize = 0;
 
-            var indices = std.AutoHashMap(T, usize).init(self.graph.alloc);
+            var indices = std.HashMap(T, usize, TContext, std.hash_map.default_max_load_percentage).init(self.graph.alloc);
             defer indices.deinit();
 
-            var lowlink = std.AutoHashMap(T, usize).init(self.graph.alloc);
+            var lowlink = std.HashMap(T, usize, TContext, std.hash_map.default_max_load_percentage).init(self.graph.alloc);
             defer lowlink.deinit();
 
-            var on_stack = std.AutoHashMap(T, void).init(self.graph.alloc);
+            var on_stack = std.HashMap(T, void, TContext, std.hash_map.default_max_load_percentage).init(self.graph.alloc);
             defer on_stack.deinit();
 
             var stack = std.ArrayList(T).empty;
@@ -182,9 +182,9 @@ pub fn Johnsons(T: type, TContext: type) type {
             self: *@This(),
             v: T,
             index: *usize,
-            indices: *std.AutoHashMap(T, usize),
-            lowlink: *std.AutoHashMap(T, usize),
-            on_stack: *std.AutoHashMap(T, void),
+            indices: *std.HashMap(T, usize, TContext, std.hash_map.default_max_load_percentage),
+            lowlink: *std.HashMap(T, usize, TContext, std.hash_map.default_max_load_percentage),
+            on_stack: *std.HashMap(T, void, TContext, std.hash_map.default_max_load_percentage),
             stack: *std.ArrayList(T),
             best_scc: *?std.ArrayList(T),
         ) !void {
@@ -258,7 +258,7 @@ pub fn Johnsons(T: type, TContext: type) type {
 
                 if (is_cyclic) {
                     if (best_scc.*) |*current| {
-                        if (candidateMin(scc.items) < candidateMin(current.items)) {
+                        if (self.graph.context.cmp(self.candidateMin(scc.items), self.candidateMin(current.items)) == -1) {
                             current.deinit(self.graph.alloc);
                             best_scc.* = scc;
                         } else {
@@ -301,7 +301,7 @@ pub fn Johnsons(T: type, TContext: type) type {
                 }
 
                 // Turn SCC into lookup set.
-                var scc_nodes = std.AutoHashMap(T, void).init(
+                var scc_nodes = std.HashMap(T, void, TContext, std.hash_map.default_max_load_percentage).init(
                     self.graph.alloc,
                 );
                 defer scc_nodes.deinit();
@@ -310,7 +310,7 @@ pub fn Johnsons(T: type, TContext: type) type {
                     try scc_nodes.put(v, {});
                 }
 
-                const s = candidateMin(scc.items);
+                const s = self.candidateMin(scc.items);
 
                 // Reset Johnson state.
                 self.blocked.clearRetainingCapacity();
@@ -337,11 +337,11 @@ pub fn Johnsons(T: type, TContext: type) type {
             return cycles;
         }
 
-        fn candidateMin(candidate: []const T) T {
+        fn candidateMin(self: @This(), candidate: []const T) T {
             var min = candidate[0];
 
             for (candidate[1..]) |v| {
-                if (v < min) {
+                if (self.graph.context.cmp(v, min) == -1) {
                     min = v;
                 }
             }
@@ -349,9 +349,9 @@ pub fn Johnsons(T: type, TContext: type) type {
             return min;
         }
 
-        fn contains(items: []const T, value: T) bool {
+        fn contains(self: @This(), items: []const T, value: T) bool {
             for (items) |item| {
-                if (item == value) {
+                if (self.graph.context.cmp(item, value) == 0) {
                     return true;
                 }
             }
@@ -363,7 +363,7 @@ pub fn Johnsons(T: type, TContext: type) type {
             self: *@This(),
             v: T,
             start: T,
-            scc_nodes: *const std.AutoHashMap(T, void),
+            scc_nodes: *const std.HashMap(T, void, TContext, std.hash_map.default_max_load_percentage),
             cycles: *std.ArrayList(std.ArrayList(T)),
         ) !bool {
             var found = false;
@@ -420,7 +420,7 @@ pub fn Johnsons(T: type, TContext: type) type {
                         entry.value_ptr.* = .empty;
                     }
 
-                    if (!contains(entry.value_ptr.items, v)) {
+                    if (!self.contains(entry.value_ptr.items, v)) {
                         try entry.value_ptr.append(
                             self.graph.alloc,
                             v,

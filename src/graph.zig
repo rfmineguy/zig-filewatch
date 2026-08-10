@@ -88,8 +88,26 @@ pub fn GraphWithContext(T: type, TContext: type) type {
     };
 }
 
+const U32Context = struct {
+    pub fn hash(_: @This(), key: []u32) u64 {
+        var h = std.hash.Wyhash.init(3497);  // <- change the hash algo according to your needs... (WyHash...)
+        h.update(key);
+        return h.final();
+    }
+
+    pub fn eql(_: @This(), a: u32, b: u32) bool {
+        return a == b;
+    }
+
+    pub fn cmp(_: @This(), a: u32, b: u32) i8 {
+        if (a < b) return -1;
+        if (a > b) return 1;
+        return 0;
+    }
+};
+
 test "u32:add_node" {
-    var g = try Graph(u32).init(testing.allocator);
+    var g = try GraphWithContext(u32, U32Context).init(testing.allocator);
     defer g.deinit();
 
     try g.add(4);
@@ -102,7 +120,7 @@ test "u32:add_node" {
 }
 
 test "u32:connect_nodes" {
-    var g = try Graph(u32).init(testing.allocator);
+    var g = try GraphWithContext(u32, U32Context).init(testing.allocator);
     defer g.deinit();
 
     try g.add(4);
@@ -121,14 +139,14 @@ test "u32:connect_nodes" {
 
 test "u32:connect_to_missing_nodes" {
     {
-        var g = try Graph(u32).init(testing.allocator);
+        var g = try GraphWithContext(u32, U32Context).init(testing.allocator);
         defer g.deinit();
 
         try g.add(4);
         try testing.expectError(error.MissingTo, g.connect(4, 3));
     }
     {
-        var g = try Graph(u32).init(testing.allocator);
+        var g = try GraphWithContext(u32, U32Context).init(testing.allocator);
         defer g.deinit();
 
         try g.add(3);
@@ -138,7 +156,7 @@ test "u32:connect_to_missing_nodes" {
 
 test "u32:bfs_iterator" {
     std.debug.print("u32:bfs_iterator\n", .{});
-    var g = try Graph(u32).init(testing.allocator);
+    var g = try GraphWithContext(u32, U32Context).init(testing.allocator);
     defer g.deinit();
 
     try g.add(0);
@@ -164,7 +182,7 @@ test "u32:bfs_iterator" {
 
 test "u32:dfs_iterator" {
     std.debug.print("u32:dfs_iterator\n", .{});
-    var g = try Graph(u32).init(testing.allocator);
+    var g = try GraphWithContext(u32, U32Context).init(testing.allocator);
     defer g.deinit();
 
     try g.add(0);
@@ -208,7 +226,7 @@ test "u32:dfs_iterator" {
 
 test "u32:cycles" {
     std.debug.print("u32:dfs_iterator\n", .{});
-    var g = try Graph(u32).init(testing.allocator);
+    var g = try GraphWithContext(u32, U32Context).init(testing.allocator);
     defer g.deinit();
 
     try g.add(0);
