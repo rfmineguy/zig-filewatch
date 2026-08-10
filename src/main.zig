@@ -16,5 +16,5 @@ pub fn main(init: std.process.Init) !void {
     defer zm.deinit();
 
     // try graph_constu8_driver(init, .{.verbose = true});
-    try graph_u32_driver(init, .{.show_dfs_traverse = true, .show_dot = true});
+    try graph_u32_driver(init, .{.show_dot = true, .show_cycles = true});
 }

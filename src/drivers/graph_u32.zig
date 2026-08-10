@@ -5,6 +5,7 @@ pub const Config = struct {
     show_title: bool = false,
     show_dot: bool = false,
     show_dfs_traverse: bool = false,
+    show_cycles: bool = false,
 };
 
 pub fn driver_u32_graph(init: std.process.Init, config: Config) !void {
@@ -38,6 +39,7 @@ pub fn driver_u32_graph(init: std.process.Init, config: Config) !void {
     try g.connect(2, 6);
     try g.connect(3, 7);
     try g.connect(7, 0);
+    try g.connect(6, 0);
 
     const io = init.io;
     var stdout_buffer: [1024]u8 = undefined;
@@ -60,5 +62,18 @@ pub fn driver_u32_graph(init: std.process.Init, config: Config) !void {
             std.debug.print("{any},", .{v});
         }
         std.debug.print("\n", .{});
+    }
+
+
+    if (config.show_cycles) {
+        if (g.detectCycles()) |cycles| {
+            for (cycles.items) |cycle| {
+                std.log.debug("Cycle [", .{});
+                for (cycle.items) |item| {
+                    std.log.debug("{any},", .{item});
+                }
+                std.log.debug("]\n", .{});
+            }
+        }
     }
 }
