@@ -47,6 +47,14 @@ pub fn graph_from_config_driver(init: std.process.Init, config: Config) !void {
     if (config.generate_dot_file) |fp|
         try g.dotFilename(init.io, fp);
 
+    if (config.show_dot) {
+        const io = init.io;
+        var stdout_buffer: [1024]u8 = undefined;
+        var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+        try g.dot(&stdout_file_writer.interface);
+        try stdout_file_writer.flush();
+    }
+
     if (config.show_cycles or config.show_all) {
         var actual = g.detectCycles();
         std.debug.print("cycles: {}\n", .{ actual.?.items.len });
