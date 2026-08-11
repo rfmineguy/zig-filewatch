@@ -49,6 +49,15 @@ pub fn GraphWithContext(T: type, TContext: type) type {
             return try .init(self);
         }
 
+        pub fn dotFilename(self: *@This(), io: std.Io, filename: []const u8) !void {
+            var buf: [1024]u8 = undefined;
+            const file = try std.Io.Dir.cwd().createFile(io, filename, .{});
+            defer file.close(io);
+            var file_writer = file.writer(io, &buf);
+            try self.dot(&file_writer.interface);
+            try file_writer.flush();
+        }
+
         pub fn dot(self: *@This(), writer: *std.Io.Writer) !void {
             var it = try self.bfs();
             var index: u32 = 0;
@@ -101,10 +110,8 @@ pub fn GraphWithContext(T: type, TContext: type) type {
 }
 
 const U32Context = struct {
-    pub fn hash(_: @This(), key: []u32) u64 {
-        var h = std.hash.Wyhash.init(3497);  // <- change the hash algo according to your needs... (WyHash...)
-        h.update(key);
-        return h.final();
+    pub fn hash(_: @This(), key: u32) u64 {
+        return std.hash.Wyhash.hash(3497, std.mem.asBytes(&key));
     }
 
     pub fn eql(_: @This(), a: u32, b: u32) bool {
@@ -237,7 +244,7 @@ test "u32:dfs_iterator" {
 }
 
 test "u32:cycles" {
-    std.debug.print("u32:dfs_iterator\n", .{});
+    std.debug.print("u32:cycles\n", .{});
     var g = try GraphWithContext(u32, U32Context).init(testing.allocator);
     defer g.deinit();
 
@@ -286,6 +293,18 @@ const ConstU8TestContext = struct {
     pub fn eql(_: @This(), a: []const u8, b: []const u8) bool {
         return std.mem.eql(u8, a, b);
     }
+
+    pub fn cmp(_: @This(), a: []const u8, b: []const u8) i8 {
+        return switch (std.mem.order(u8, a, b)) {
+            .eq => 0,
+            .lt => -1,
+            .gt => 1,
+        };
+    }
+
+    pub fn format(_: @This(), v: []const u8, writer: *std.Io.Writer) !void {
+        try writer.print("{s}", .{v});
+    }
 };
 fn contains(ctx: anytype, haystack: [][]const u8, needle: []const u8) bool {
     for (haystack) |item| {
@@ -316,6 +335,33 @@ test "[]const u8:connect_nodes" {
     try testing.expect(g.nodes.get("hello") != null);
     try testing.expect(contains(g.context, g.nodes.get("hello").?.items, "goodbye"));
     try testing.expect(!contains(g.context, g.nodes.get("goodbye").?.items, "hello"));
+}
+
+test "[]const u8:cycles" {
+    std.debug.print("[]const u8:cycles\n", .{});
+    var g = try GraphWithContext([]const u8, ConstU8TestContext).init(testing.allocator);
+    errdefer g.deinit();
+
+    try g.add("id0");
+    try g.add("id1");
+    try g.add("id2");
+
+    try g.connect("id0", "id1");
+    try g.connect("id0", "id2");
+    try g.connect("id1", "id0");
+    try g.connect("id1", "id2");
+    try g.connect("id2", "id0");
+    try g.connect("id2", "id1");
+
+    var actual = g.detectCycles();
+    try testing.expect(actual != null);
+    try testing.expect(actual.?.items.len == 3);
+
+    for (actual.?.items) |*actual_cycle| {
+        std.debug.print("{any},", .{actual_cycle});
+        actual_cycle.deinit(g.alloc);
+    }
+    actual.?.deinit(g.alloc);
 }
 
 test "struct:add_node" {
