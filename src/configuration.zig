@@ -1,5 +1,6 @@
 const std = @import("std");
 const zon = std.zon;
+const graph = @import("graph.zig");
 
 pub const SequenceEntry = union(enum) {
     action: ?[]const u8,
@@ -14,6 +15,30 @@ pub const WatcherCfg = struct {
 pub const Action = struct {
     id: []const u8,
     sequence: []SequenceEntry,
+};
+
+const ConstU8Context = struct {
+    pub fn hash(_: @This(), key: []const u8) u64 {
+        var h = std.hash.Wyhash.init(3497);  // <- change the hash algo according to your needs... (WyHash...)
+        h.update(key);
+        return h.final();
+    }
+
+    pub fn eql(_: @This(), a: []const u8, b: []const u8) bool {
+        return std.mem.eql(u8, a, b);
+    }
+
+    pub fn cmp(_: @This(), a: []const u8, b: []const u8) i8 {
+        return switch (std.mem.order(u8, a, b)) {
+            .eq => 0,
+            .lt => -1,
+            .gt => 1,
+        };
+    }
+
+    pub fn format(_: @This(), v: []const u8, writer: *std.Io.Writer) !void {
+        try writer.print("{s}", .{v});
+    }
 };
 
 pub const Config = struct {
@@ -78,6 +103,28 @@ pub const Config = struct {
     }
     pub fn deinit(self: @This()) void {
         _ = self;
+    }
+    pub fn calculateGraph(self: @This(), alloc: std.mem.Allocator) !graph.GraphWithContext([]const u8, ConstU8Context) {
+        var graph_ = try graph.GraphWithContext([]const u8, ConstU8Context).init(alloc);
+        if (self.actions) |actions| {
+            for (actions) |action| {
+                const id = action.id;
+                try graph_.add(id);
+            }
+            for (actions) |action| {
+                for (action.sequence) |seq_entry| {
+                    switch (seq_entry) {
+                        .shell => |shell| {
+                            _ = shell;
+                        },
+                        .action => |action_| {
+                             try graph_.connect(action.id, action_.?);
+                        },
+                    }
+                }
+            }
+        }
+        return graph_;
     }
 };
 
