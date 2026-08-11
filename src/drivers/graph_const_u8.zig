@@ -1,6 +1,9 @@
 const std = @import("std");
 const graph = @import("../graph.zig");
-const Config = @import("driver.zig").Config;
+
+pub const Config = struct {
+    verbose: bool = false,
+};
 
 const ConstU8Context = struct {
     pub fn hash(_: @This(), key: []const u8) u64 {
@@ -11,6 +14,18 @@ const ConstU8Context = struct {
 
     pub fn eql(_: @This(), a: []const u8, b: []const u8) bool {
         return std.mem.eql(u8, a, b);
+    }
+
+    pub fn cmp(_: @This(), a: []const u8, b: []const u8) i8 {
+        return switch (std.mem.order(u8, a, b)) {
+            .eq => 0,
+            .lt => -1,
+            .gt => 1,
+        };
+    }
+
+    pub fn format(_: @This(), v: []const u8, writer: *std.Io.Writer) !void {
+        try writer.print("{s}", .{v});
     }
 };
 pub fn driver_constu8_graph(init: std.process.Init, config: Config) !void {

@@ -6,43 +6,15 @@ pub const Config = struct {
     show_dot: bool = false,
     show_dfs_traverse: bool = false,
     show_cycles: bool = false,
-    show_all: bool = false,
-
-    pub const __messages__ = .{};
 };
 
-const U32Context = struct {
-    pub fn hash(_: @This(), key: u32) u64 {
-        return std.hash.Wyhash.hash(3497, std.mem.asBytes(&key));
-    }
-
-    pub fn eql(_: @This(), a: u32, b: u32) bool {
-        return a == b;
-    }
-
-    pub fn cmp(_: @This(), a: u32, b: u32) i8 {
-        if (a < b) return -1;
-        if (a > b) return 1;
-        return 0;
-    }
-
-    pub fn format(_: @This(), v: u32, writer: *std.Io.Writer) !void {
-        try writer.print("{d}", .{v});
-    }
-};
-
-pub fn driver_u32_graph(init: std.process.Init, config: Config) !void {
-    var g = try graph.GraphWithContext(u32, U32Context).init(init.arena.allocator());
+pub fn driver_cont_u8_fullyconnected_graph(init: std.process.Init, config: Config) !void {
+    var g = try graph.Graph(u32).init(init.arena.allocator());
     defer g.deinit();
 
     try g.add(0);
     try g.add(1);
     try g.add(2);
-    try g.add(3);
-    try g.add(4);
-    try g.add(5);
-    try g.add(6);
-    try g.add(7);
 
 
     // create binary tree
@@ -68,16 +40,16 @@ pub fn driver_u32_graph(init: std.process.Init, config: Config) !void {
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
 
-    if (config.show_title or config.show_all) {
+    if (config.show_title) {
         std.debug.print("=============================\n", .{});
         std.debug.print("     driver_u32_graph\n", .{});
         std.debug.print("=============================\n", .{});
     }
-    if (config.show_dot or config.show_all) {
+    if (config.show_dot) {
         try g.dot(&stdout_file_writer.interface);
         try stdout_file_writer.flush();
     }
-    if (config.show_dfs_traverse or config.show_all) {
+    if (config.show_dfs_traverse) {
         var it = try g.dfs();
         defer it.deinit();
         var idx: u32 = 0;
@@ -88,7 +60,7 @@ pub fn driver_u32_graph(init: std.process.Init, config: Config) !void {
     }
 
 
-    if (config.show_cycles or config.show_all) {
+    if (config.show_cycles) {
         if (g.detectCycles()) |cycles| {
             for (cycles.items) |cycle| {
                 std.log.debug("Cycle [", .{});
