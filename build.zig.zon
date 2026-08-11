@@ -40,6 +40,10 @@
             .url = "git+https://github.com/rfmineguy/zigmon#4281f73f46da6956db5ec98b5ce7d356a17adc55",
             .hash = "zigmon-0.0.1-Qy5Zt40UAQBUNUi6iVY4HPjiM7XYQx_7k2_t9BVdLNaT",
         },
+        .zigcli = .{
+            .url = "git+https://github.com/jiacai2050/zigcli.git#8edd28e5f8ee4317b770a2bbb61902a88832f37f",
+            .hash = "zigcli-0.6.2-ORC7jKipBgACkx_85RKXdxjINMRxJts-AmSLXMJqR2Ji",
+        },
     },
     .paths = .{
         "build.zig",

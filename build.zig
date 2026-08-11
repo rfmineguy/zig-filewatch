@@ -31,6 +31,9 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkFramework("CoreServices", .{});
     }
 
+    const zigcli = b.dependency("zigcli", .{});
+    exe.root_module.addImport("zigcli", zigcli.module("zigcli"));
+
     exe.root_module.addCSourceFile(.{.file = b.path("vendor/wildmatch/wildmatch.c")});
     exe.root_module.addIncludePath(b.path("vendor/wildmatch"));
 
