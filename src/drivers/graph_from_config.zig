@@ -47,7 +47,7 @@ pub fn graph_from_config_driver(init: std.process.Init, config: Config) !void {
     if (config.generate_dot_file) |fp|
         try g.dotFilename(init.io, fp);
 
-    if (config.show_dot) {
+    if (config.show_dot or config.show_all) {
         const io = init.io;
         var stdout_buffer: [1024]u8 = undefined;
         var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
