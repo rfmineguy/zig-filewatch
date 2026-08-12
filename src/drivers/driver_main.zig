@@ -11,7 +11,7 @@ pub const Config = struct {
     file: []const u8 = "test.zig.zon",
     show_cycles: bool = false,
     dotfile: ?[]const u8,
-    trigger: ?[]const u8,
+    action: ?[]const u8,
 
     pub const __messages__ = .{};
 };
@@ -40,7 +40,7 @@ const ConstU8Context = struct {
     }
 };
 
-fn show_cycles(init: std.process.Init, g: *graph.GraphWithContext([]const u8,Configuration.ConstU8Context)) !void {
+fn show_cycles(init: std.process.Init, cycles: std.ArrayList(std.ArrayList([]const u8))) !void {
     var table = pt.Table(1).Owned.init(.{
         .mode = .box,
         .padding = 1,
@@ -56,20 +56,19 @@ fn show_cycles(init: std.process.Init, g: *graph.GraphWithContext([]const u8,Con
             str.deinit(init.gpa);
         cycle_strs.deinit(init.gpa);
     }
-    if (g.detectCycles()) |cycles| {
-        for (cycles.items) |cycle| {
-            var cycle_str = std.ArrayList(u8).empty;
 
-            for (cycle.items, 0..) |node, i| {
-                if (i != 0) {
-                    try cycle_str.appendSlice(init.gpa, " -> ");
-                }
+    for (cycles.items) |cycle| {
+        var cycle_str = std.ArrayList(u8).empty;
 
-                try cycle_str.appendSlice(init.gpa, node);
+        for (cycle.items, 0..) |node, i| {
+            if (i != 0) {
+                try cycle_str.appendSlice(init.gpa, " -> ");
             }
-            try cycle_strs.append(init.gpa, cycle_str);
-            try table.addRow(init.gpa, .{cycle_str.items});
+
+            try cycle_str.appendSlice(init.gpa, node);
         }
+        try cycle_strs.append(init.gpa, cycle_str);
+        try table.addRow(init.gpa, .{cycle_str.items});
     }
 
     const io = init.io;
@@ -77,6 +76,12 @@ fn show_cycles(init: std.process.Init, g: *graph.GraphWithContext([]const u8,Con
     var writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     try writer.interface.print("{f}", .{table});
     try writer.interface.flush();
+}
+
+fn run_action(init: std.process.Init, g: *graph.GraphWithContext([]const u8,Configuration.ConstU8Context), action: []const u8) !void {
+    _ = init;
+    _ = g;
+    _ = action;
 }
 
 pub fn driver_main(init: std.process.Init, config: Config) !void {
@@ -91,10 +96,17 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
     }
 
     if (config.show_cycles) {
-        try show_cycles(init, &g);
+        if (g.detectCycles()) |cycles| try show_cycles(init, cycles);
     }
 
-    if (config.trigger) |trigger| {
-        _ = trigger; // TODO : Implement
+    if (config.action) |action| {
+        if (g.detectCycles()) |cycles| {
+            if (cycles.items.len != 0) {
+                try show_cycles(init, cycles);
+                std.debug.print("Error: can't run with cycles present\n", .{});
+            }
+            return;
+        }
+        try run_action(init, &g, action);
     }
 }
