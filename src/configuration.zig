@@ -17,7 +17,7 @@ pub const Action = struct {
     sequence: []SequenceEntry,
 };
 
-const ConstU8Context = struct {
+pub const ConstU8Context = struct {
     pub fn hash(_: @This(), key: []const u8) u64 {
         var h = std.hash.Wyhash.init(3497);  // <- change the hash algo according to your needs... (WyHash...)
         h.update(key);
