@@ -235,7 +235,7 @@ pub fn Johnsons(T: type, TContext: type) type {
 
                     try scc.append(self.graph.alloc, w);
 
-                    if (std.meta.eql(w, v)) {
+                    if (self.graph.context.cmp(w, v) == 0) {
                         break;
                     }
                 }
@@ -249,7 +249,7 @@ pub fn Johnsons(T: type, TContext: type) type {
 
                     const edges = self.graph.nodes.get(node).?;
                     for (edges.items) |w| {
-                        if (std.meta.eql(w, node)) {
+                        if (self.graph.context.cmp(w, node) == 0) {
                             is_cyclic = true;
                             break;
                         }
@@ -377,7 +377,7 @@ pub fn Johnsons(T: type, TContext: type) type {
                     continue;
                 }
 
-                if (std.meta.eql(w, start)) {
+                if (self.graph.context.cmp(w, start) == 0) {
                     var cycle = std.ArrayList(T).empty;
                     //errdefer cycle.deinit(self.graph.alloc);
 
