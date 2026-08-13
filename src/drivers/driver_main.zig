@@ -105,7 +105,7 @@ fn run_action(init: std.process.Init, zoncfg: ZigFilewatchConfig, g: *U8Graph, a
 
                 const shell_node = thisnode.start(s.?, 1);
                 defer shell_node.end();
-                var shell = shell_action.ShellAction.init(init.gpa, init.io, argv);
+                var shell = shell_action.ShellAction.init(init.arena.allocator(), init.io, argv);
                 defer shell.deinit();
                 const result = try shell.execute();
                 shell_node.completeOne();
