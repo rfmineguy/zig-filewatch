@@ -39,6 +39,18 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
+    const test_exe = b.addExecutable(.{
+        .name = "test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+            },
+        })
+    });
+    b.installArtifact(test_exe);
+
     const run_step = b.step("run", "Run the app");
 
     const run_cmd = b.addRunArtifact(exe);
