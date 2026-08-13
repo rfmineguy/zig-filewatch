@@ -38,7 +38,7 @@ const ConstU8Context = struct {
 };
 
 pub fn graph_from_config_driver(init: std.process.Init, config: Config) !void {
-    const zonConfig = try Configuration.fromZonFile(init.arena.allocator(), init.io, config.file);
+    var zonConfig = try Configuration.fromZonFile(init.arena.allocator(), init.io, config.file);
     defer zonConfig.deinit();
 
     var g = try zonConfig.calculateGraph(init.arena.allocator());
