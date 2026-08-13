@@ -2,6 +2,7 @@ const ConstU8GraphConfig = @import("drivers/graph_const_u8.zig").Config;
 const U32GraphConfig = @import("drivers/graph_u32.zig").Config;
 const ConfigurationGraphConfig = @import("drivers/graph_from_config.zig").Config;
 const ProcessSpawnConfig = @import("drivers/driver_process_spawn.zig").Config;
+const FancyOutputConfig = @import("drivers/driver_fancy_output.zig").Config;
 const MainConfig = @import("drivers/driver_main.zig").Config;
 
 pub const Options = struct {
@@ -12,6 +13,7 @@ pub const Options = struct {
         driver_graph_from_config: ConfigurationGraphConfig,
         driver_process_spawn: ProcessSpawnConfig,
         driver_main: MainConfig,
+        driver_fancy_output: FancyOutputConfig,
 
         pub const __messages__ = .{
             .driver_graph_const_u8 = "Driver (Graph []const u8)",
@@ -19,6 +21,7 @@ pub const Options = struct {
             .driver_graph_from_config = "Driver (Graph from config)",
             .driver_process_spawn = "Driver (Process spawn)",
             .driver_main = "Driver (Main)",
+            .driver_fancy_output = "Driver (Fancy Output)",
         };
     },
 

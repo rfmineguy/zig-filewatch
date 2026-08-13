@@ -16,6 +16,7 @@ const graph_u32_driver = @import("drivers/graph_u32.zig").driver_u32_graph;
 const graph_from_config_driver = @import("drivers/graph_from_config.zig").graph_from_config_driver;
 const driver_process_spawn = @import("drivers/driver_process_spawn.zig").driver_process_spawn;
 const driver_main = @import("drivers/driver_main.zig").driver_main;
+const driver_fancy_output = @import("drivers/driver_fancy_output.zig").driver_fancy_output;
 
 pub const std_options: std.Options = .{
     .log_level = .info,
@@ -44,5 +45,7 @@ pub fn main(init: std.process.Init) !void {
             try driver_process_spawn(init, config),
         .driver_main => |config|
             try driver_main(init, config),
+        .driver_fancy_output => |config|
+            try driver_fancy_output(init, config),
     }
 }
