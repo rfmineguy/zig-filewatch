@@ -41,9 +41,14 @@ pub const ConstU8Context = struct {
     }
 };
 
-pub const Config = struct {
+const ConfigData = struct {
     watchers: ?[]WatcherCfg,
     actions: ?[]Action,
+};
+
+pub const Config = struct {
+    config_data: ConfigData,
+    actions_map: std.HashMap([]const u8, *Action, ConstU8Context, std.hash_map.default_max_load_percentage),
     pub fn default() Config {
         return @This() {
             .watchers = null,
@@ -51,7 +56,7 @@ pub const Config = struct {
         };
     }
     pub fn format(self: Config, writer: *std.Io.Writer) !void {
-        try zon.stringify.serialize(self, .{}, writer);
+        try zon.stringify.serialize(self.config_data, .{}, writer);
     }
     pub fn fromZonFile(alloc: std.mem.Allocator, io: std.Io, filepath: []const u8) !Config {
         const source = std.Io.Dir.cwd().readFileAlloc(io, filepath, alloc, std.Io.Limit.limited(10 * 1024 * 1024)) catch |err| {
@@ -66,11 +71,24 @@ pub const Config = struct {
         @memcpy(source_z[0..source_z.len], source);
 
         var diag: zon.parse.Diagnostics = .{};
-        const parsed = zon.parse.fromSliceAlloc(Config, alloc, source_z, &diag, .{}) catch |err| {
+        const parsed = zon.parse.fromSliceAlloc(ConfigData, alloc, source_z, &diag, .{}) catch |err| {
             printZonDiagnostic(source_z, &diag, err);
             return error.FailedParse;
         };
-        return parsed;
+        var config = @This() {
+            .config_data = parsed,
+            .actions_map = .init(alloc),
+        };
+
+        if (parsed.actions) |actions| {
+            for (actions) |*action| try config.actions_map.put(action.id, action);
+        }
+
+        // var it = config.actions_map.iterator();
+        // while (it.next()) |pair| {
+        //     std.debug.print("{s}: {any}\n", .{pair.key_ptr.*, pair.value_ptr.*});
+        // }
+        return config;
     }
     fn printZonDiagnostic(
         source: []const u8,
@@ -101,12 +119,12 @@ pub const Config = struct {
             }
         }
     }
-    pub fn deinit(self: @This()) void {
-        _ = self;
+    pub fn deinit(self: *@This()) void {
+        self.actions_map.deinit();
     }
     pub fn calculateGraph(self: @This(), alloc: std.mem.Allocator) !graph.GraphWithContext([]const u8, ConstU8Context) {
         var graph_ = try graph.GraphWithContext([]const u8, ConstU8Context).init(alloc);
-        if (self.actions) |actions| {
+        if (self.config_data.actions) |actions| {
             for (actions) |action| {
                 const id = action.id;
                 try graph_.add(id);
