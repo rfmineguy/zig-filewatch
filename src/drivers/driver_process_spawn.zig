@@ -29,10 +29,17 @@ fn helper(alloc: std.mem.Allocator, io: std.Io, config: Config, index: u32, argv
     std.debug.print("==========================\n", .{});
     var sa = shell_action.ShellAction.init(alloc, io, argv);
     defer sa.deinit();
-    const handles = sa.execute();
-    if (handles) |h| {
-        if (h.stdout) |buf| std.debug.print("stdout:\n {s}\n", .{buf});
-        if (h.stderr) |buf| std.debug.print("stderr:\n {s}\n", .{buf});
+    const result = try sa.execute();
+    switch (result) {
+        .success => |v| {
+            defer v.deinit();
+
+            std.debug.print("stdout: {s}\n", .{v.stdout.?});
+            std.debug.print("stderr: {s}\n", .{v.stderr.?});
+        },
+        .fail => |err| {
+            std.debug.print("Error: {any}\n", .{err});
+        },
     }
 }
 
