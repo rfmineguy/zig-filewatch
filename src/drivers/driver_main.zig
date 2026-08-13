@@ -8,6 +8,8 @@ const Table = pt.Table;
 const Cell = pt.Cell;
 const shell_action = @import("../shell_action.zig");
 
+const U8Graph = graph.GraphWithContext([]const u8, Configuration.ConstU8Context);
+
 pub const Config = struct {
     file: []const u8 = "test.zig.zon",
     show_cycles: bool = false,
@@ -79,44 +81,45 @@ fn show_cycles(init: std.process.Init, cycles: std.ArrayList(std.ArrayList([]con
     try writer.interface.flush();
 }
 
-fn run_action(init: std.process.Init, zoncfg: ZigFilewatchConfig, g: *graph.GraphWithContext([]const u8,Configuration.ConstU8Context), action_name: []const u8) !void {
+fn run_action(init: std.process.Init, zoncfg: ZigFilewatchConfig, g: *U8Graph, action_name: []const u8, output_map: *std.StringHashMap(shell_action.CmdResult), node: std.Progress.Node) !void {
     if (zoncfg.config_data.actions == null) return error.NullActions;
     if (zoncfg.actions_map.get(action_name) == null) return error.NoActionForActionName;
     if (g.nodes.get(action_name) == null) return error.NullAction;
-    std.debug.print("{any}\n", .{g.nodes.get(action_name).?});
-    std.debug.print("Running action {s} [{d} dependencies]\n", .{action_name, zoncfg.actions_map.get(action_name).?.sequence.len});
+    // std.debug.print("{any}\n", .{g.nodes.get(action_name).?});
+    // std.debug.print("Running action {s} [{d} dependencies]\n", .{action_name, zoncfg.actions_map.get(action_name).?.sequence.len});
 
-    for (g.nodes.get(action_name).?.items) |action_| {
-        std.debug.print("{s}", .{action_name});
-        if (zoncfg.actions_map.get(action_)) |next_| {
-            std.debug.print("{s} has sequence len of {d}\n", .{next_.id, next_.sequence.len});
-            for (next_.sequence) |entry| {
-                switch (entry) {
-                    .shell => |s| {
-                        std.debug.print("Executing shell seq entry\n", .{});
-                        var parts = std.ArrayList([]const u8).empty;
-                        errdefer parts.deinit(init.gpa);
+    const thisnode = node.start(action_name, zoncfg.actions_map.get(action_name).?.sequence.len);
+    defer thisnode.end();
+    for (zoncfg.actions_map.get(action_name).?.sequence) |entry| {
+        switch (entry) {
+            .shell => |s| {
+                // std.debug.print("Executing shell seq entry {s}\n", .{s.?});
+                var parts = std.ArrayList([]const u8).empty;
+                errdefer parts.deinit(init.gpa);
 
-                        var it = std.mem.tokenizeScalar(u8, s.?, ' ');
-                        while (it.next()) |part| try parts.append(init.gpa, part);
+                var it = std.mem.tokenizeScalar(u8, s.?, ' ');
+                while (it.next()) |part| try parts.append(init.gpa, part);
 
-                        const argv = try parts.toOwnedSlice(init.gpa);
-                        defer init.gpa.free(argv);
+                const argv = try parts.toOwnedSlice(init.gpa);
+                defer init.gpa.free(argv);
 
-                        var shell = shell_action.ShellAction.init(init.gpa, init.io, argv);
-                        defer shell.deinit();
-                        if (shell.execute()) |output| {
-                            std.debug.print("{s}\n", .{output.stderr.?});
-                        }
-                    },
-                    .action => |action| {
-                        std.debug.print("Executing action seq entry: '{s}'\n", .{action.?});
-                        try run_action(init, zoncfg, g, action.?);
-                    }
-                }
+                const shell_node = thisnode.start(s.?, 1);
+                defer shell_node.end();
+                var shell = shell_action.ShellAction.init(init.gpa, init.io, argv);
+                defer shell.deinit();
+                const result = try shell.execute();
+                shell_node.completeOne();
+                try output_map.put(s.?, result);
+
+            },
+            .action => |action| {
+                // std.debug.print("Executing action seq entry: '{s}'\n", .{action.?});
+                try run_action(init, zoncfg, g, action.?, output_map, thisnode);
+                thisnode.completeOne();
             }
         }
     }
+    try std.Io.sleep(init.io, std.Io.Duration.fromMilliseconds(1), .awake);
 }
 
 pub fn driver_main(init: std.process.Init, config: Config) !void {
@@ -142,7 +145,31 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
                 return;
             }
         }
+        var progress = std.Progress.start(init.io, .{
+            .root_name = action,
+        });
+        defer progress.end();
+        var outputs = std.StringHashMap(shell_action.CmdResult).init(init.arena.allocator());
+        defer outputs.deinit();
+        defer {
+            var it = outputs.iterator();
+            while (it.next()) |v| {
+                switch (v.value_ptr.*) {
+                    .success => |v_| {
+                        defer v_.deinit();
+
+                        std.debug.print("Command {s}\n", .{v.key_ptr.*});
+                        std.debug.print("   stdout: {s}\n", .{v_.stdout.?});
+                        std.debug.print("   stderr: {s}\n", .{v_.stderr.?});
+                    },
+                    .fail => |err| {
+                        std.debug.print("Error: {any}\n", .{err});
+                    },
+                }
+            }
+        }
         // std.debug.print("Running action: {s}\n", .{action});
-        try run_action(init, zonConfig, &g, action);
+        try run_action(init, zonConfig, &g, action, &outputs, progress);
+        try std.Io.sleep(init.io, std.Io.Duration.fromMilliseconds(1), .awake);
     }
 }
