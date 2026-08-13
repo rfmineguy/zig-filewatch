@@ -29,9 +29,11 @@ fn helper(alloc: std.mem.Allocator, io: std.Io, config: Config, index: u32, argv
     std.debug.print("==========================\n", .{});
     var sa = shell_action.ShellAction.init(alloc, io, argv);
     defer sa.deinit();
-    const handles = try sa.execute();
-    if (handles.stdout) |buf| std.debug.print("stdout:\n {s}\n", .{buf});
-    if (handles.stderr) |buf| std.debug.print("stderr:\n {s}\n", .{buf});
+    const handles = sa.execute();
+    if (handles) |h| {
+        if (h.stdout) |buf| std.debug.print("stdout:\n {s}\n", .{buf});
+        if (h.stderr) |buf| std.debug.print("stderr:\n {s}\n", .{buf});
+    }
 }
 
 pub fn driver_process_spawn(init: std.process.Init, config: Config) !void {
