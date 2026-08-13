@@ -6,6 +6,7 @@ const zigcli = @import("zigcli");
 const pt = zigcli.pretty_table;
 const Table = pt.Table;
 const Cell = pt.Cell;
+const shell_action = @import("../shell_action.zig");
 
 pub const Config = struct {
     file: []const u8 = "test.zig.zon",
@@ -78,14 +79,48 @@ fn show_cycles(init: std.process.Init, cycles: std.ArrayList(std.ArrayList([]con
     try writer.interface.flush();
 }
 
-fn run_action(init: std.process.Init, g: *graph.GraphWithContext([]const u8,Configuration.ConstU8Context), action: []const u8) !void {
-    _ = init;
-    _ = g;
-    _ = action;
+fn run_action(init: std.process.Init, zoncfg: ZigFilewatchConfig, g: *graph.GraphWithContext([]const u8,Configuration.ConstU8Context), action_name: []const u8) !void {
+    if (zoncfg.config_data.actions == null) return error.NullActions;
+    if (zoncfg.actions_map.get(action_name) == null) return error.NoActionForActionName;
+    if (g.nodes.get(action_name) == null) return error.NullAction;
+    std.debug.print("{any}\n", .{g.nodes.get(action_name).?});
+    std.debug.print("Running action {s} [{d} dependencies]\n", .{action_name, zoncfg.actions_map.get(action_name).?.sequence.len});
+
+    for (g.nodes.get(action_name).?.items) |action_| {
+        std.debug.print("{s}", .{action_name});
+        if (zoncfg.actions_map.get(action_)) |next_| {
+            std.debug.print("{s} has sequence len of {d}\n", .{next_.id, next_.sequence.len});
+            for (next_.sequence) |entry| {
+                switch (entry) {
+                    .shell => |s| {
+                        std.debug.print("Executing shell seq entry\n", .{});
+                        var parts = std.ArrayList([]const u8).empty;
+                        errdefer parts.deinit(init.gpa);
+
+                        var it = std.mem.tokenizeScalar(u8, s.?, ' ');
+                        while (it.next()) |part| try parts.append(init.gpa, part);
+
+                        const argv = try parts.toOwnedSlice(init.gpa);
+                        defer init.gpa.free(argv);
+
+                        var shell = shell_action.ShellAction.init(init.gpa, init.io, argv);
+                        defer shell.deinit();
+                        if (shell.execute()) |output| {
+                            std.debug.print("{s}\n", .{output.stderr.?});
+                        }
+                    },
+                    .action => |action| {
+                        std.debug.print("Executing action seq entry: '{s}'\n", .{action.?});
+                        try run_action(init, zoncfg, g, action.?);
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub fn driver_main(init: std.process.Init, config: Config) !void {
-    const zonConfig = try ZigFilewatchConfig.fromZonFile(init.arena.allocator(), init.io, config.file);
+    var zonConfig = try ZigFilewatchConfig.fromZonFile(init.arena.allocator(), init.io, config.file);
     defer zonConfig.deinit();
 
     var g = try zonConfig.calculateGraph(init.arena.allocator());
@@ -104,9 +139,10 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
             if (cycles.items.len != 0) {
                 try show_cycles(init, cycles);
                 std.debug.print("Error: can't run with cycles present\n", .{});
+                return;
             }
-            return;
         }
-        try run_action(init, &g, action);
+        // std.debug.print("Running action: {s}\n", .{action});
+        try run_action(init, zonConfig, &g, action);
     }
 }
