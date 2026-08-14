@@ -4,6 +4,7 @@ const ConfigurationGraphConfig = @import("drivers/graph_from_config.zig").Config
 const ProcessSpawnConfig = @import("drivers/driver_process_spawn.zig").Config;
 const FancyOutputConfig = @import("drivers/driver_fancy_output.zig").Config;
 const MainConfig = @import("drivers/driver_main.zig").Config;
+const WatcherConfig = @import("drivers/driver_watcher.zig").Config;
 
 pub const Options = struct {
     help: bool = false,
@@ -14,6 +15,7 @@ pub const Options = struct {
         driver_process_spawn: ProcessSpawnConfig,
         driver_main: MainConfig,
         driver_fancy_output: FancyOutputConfig,
+        driver_watcher: WatcherConfig,
 
         pub const __messages__ = .{
             .driver_graph_const_u8 = "Driver (Graph []const u8)",
@@ -22,6 +24,7 @@ pub const Options = struct {
             .driver_process_spawn = "Driver (Process spawn)",
             .driver_main = "Driver (Main)",
             .driver_fancy_output = "Driver (Fancy Output)",
+            .driver_watcher = "Driver(Watcher)",
         };
     },
 

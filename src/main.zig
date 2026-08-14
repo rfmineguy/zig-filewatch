@@ -5,7 +5,6 @@ const zig_filewatch = @import("zig_filewatch");
 const graph = @import("graph.zig");
 const configuration = @import("configuration.zig");
 const Config = configuration.Config;
-const Watcher = @import("watcher.zig").Watcher;
 const zm = @import("zigmon");
 const zigcli = @import("zigcli");
 const structargs = zigcli.structargs;
@@ -17,6 +16,7 @@ const graph_from_config_driver = @import("drivers/graph_from_config.zig").graph_
 const driver_process_spawn = @import("drivers/driver_process_spawn.zig").driver_process_spawn;
 const driver_main = @import("drivers/driver_main.zig").driver_main;
 const driver_fancy_output = @import("drivers/driver_fancy_output.zig").driver_fancy_output;
+const driver_watcher = @import("drivers/driver_watcher.zig").driver_watcher;
 
 pub const std_options: std.Options = .{
     .log_level = .info,
@@ -47,5 +47,7 @@ pub fn main(init: std.process.Init) !void {
             try driver_main(init, config),
         .driver_fancy_output => |config|
             try driver_fancy_output(init, config),
+        .driver_watcher => |config|
+            try driver_watcher(init, config),
     }
 }
