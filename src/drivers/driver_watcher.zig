@@ -16,19 +16,13 @@ fn on_change(w: Watcher, action: zm.Action, path: []const u8, oldpath: ?[]const 
 }
 
 pub fn driver_watcher(init: std.process.Init, config: Config) !void {
-    _ = init;
     _ = config;
     zm.init();
     defer zm.deinit();
 
-    var my_watcher: Watcher = .{
-        .root = ".",
-        .data = 1337,
-
-        .on_change = on_change,
-    };
-    try my_watcher.watch();
-    defer my_watcher.unwatch();
-
+    var w = try watcher.Watcher.init(init.gpa);
+    defer w.deinit();
+    try w.addPattern("**/*.zig");
+    try w.start(".");
     while (true) {}
 }
