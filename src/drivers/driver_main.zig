@@ -8,6 +8,10 @@ const Table = pt.Table;
 const Cell = pt.Cell;
 const shell_action = @import("../shell_action.zig");
 
+const zm = @import("zigmon");
+const watcher = @import("../watcher.zig");
+const ConcurrentQueue = @import("../event_queue.zig").ConcurrentQueue;
+
 const U8Graph = graph.GraphWithContext([]const u8, Configuration.ConstU8Context);
 
 pub const Config = struct {
@@ -15,6 +19,8 @@ pub const Config = struct {
     show_cycles: bool = false,
     dotfile: ?[]const u8,
     action: ?[]const u8,
+    watch: bool = false,
+    verbose: bool = false,
 
     pub const __messages__ = .{};
 };
@@ -119,7 +125,7 @@ fn run_action(init: std.process.Init, zoncfg: ZigFilewatchConfig, g: *U8Graph, a
             }
         }
     }
-    try std.Io.sleep(init.io, std.Io.Duration.fromMilliseconds(1), .awake);
+    try std.Io.sleep(init.io, std.Io.Duration.fromMilliseconds(100), .awake);
 }
 
 pub fn driver_main(init: std.process.Init, config: Config) !void {
@@ -171,5 +177,46 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
         // std.debug.print("Running action: {s}\n", .{action});
         try run_action(init, zonConfig, &g, action, &outputs, progress);
         try std.Io.sleep(init.io, std.Io.Duration.fromMilliseconds(1), .awake);
+    }
+
+    if (config.watch) {
+        var queue = try ConcurrentQueue([]const u8).init(init.io, init.gpa);
+        defer queue.deinit();
+        var watchers = try std.ArrayList(*watcher.Watcher).initCapacity(init.gpa, 10);
+        defer {
+            for (watchers.items) |item| {
+                item.stop();
+                init.gpa.destroy(item);
+            }
+        }
+        defer watchers.deinit(init.gpa);
+        zm.init();
+        defer zm.deinit();
+
+        if (zonConfig.config_data.watchers == null) return error.NoWatchersConfigured;
+        const cfg_watchers = zonConfig.config_data.watchers.?;
+        for (cfg_watchers) |cfg_watcher| {
+            const w = try init.gpa.create(watcher.Watcher);
+            errdefer init.gpa.destroy(w);
+
+            w.* = try watcher.Watcher.init(init.gpa, &queue);
+
+            for (cfg_watcher.patterns) |pattern| {
+                try w.addPattern(pattern);
+            }
+
+            try w.start(".");
+
+            try watchers.append(init.gpa, w);
+        }
+        while (true) {
+            var i: u32 = 0;
+            try std.Io.sleep(init.io, std.Io.Duration.fromSeconds(1), .awake);
+            // std.debug.print("Waiting for events\n", .{});
+            while (try queue.dequeue()) |v| : (i+=1) {
+                if (config.verbose)
+                    std.debug.print("v = {s}, i = {d}\n", .{v, i});
+            }
+        }
     }
 }
