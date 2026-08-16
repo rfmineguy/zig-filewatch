@@ -20,7 +20,7 @@ pub fn driver_watcher(init: std.process.Init, config: Config) !void {
     zm.init();
     defer zm.deinit();
 
-    var w = try watcher.Watcher.init(init.gpa);
+    var w = try watcher.Watcher.init(init.gpa, null);
     defer w.deinit();
     try w.addPattern("**/*.zig");
     try w.start(".");
