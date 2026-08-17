@@ -66,8 +66,11 @@ pub const Watcher = struct {
                 // std.debug.print("matching {s} with {s}\n", .{path, pattern});
                 const v = wildmatch.wildmatch(c_pattern, c_path, wildmatch.WM_WILDSTAR);
                 if (v == wildmatch.WM_MATCH) {
-                    if (self.shared_queue) |q|
-                        q.enqueue(path) catch return;
+                    if (self.shared_queue) |q| {
+                        const owned = self.alloc.dupe(u8, path) catch return;
+                        errdefer self.alloc.free(owned);
+                        q.enqueue(owned) catch return;
+                    }
                     // std.debug.print("{s} matched {s}\n", .{path, pattern});
                 }
             }
