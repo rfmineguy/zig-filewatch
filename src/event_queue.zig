@@ -27,8 +27,8 @@ pub fn ConcurrentQueue(T: type) type {
             try self.queue__internal.append(self.alloc, v);
             self.sem.post(self.io);
         }
-        pub fn wait(self: @This()) !void {
-            try self.sem.wait();
+        pub fn wait(self: *@This()) !void {
+            try self.sem.wait(self.io);
         }
         pub fn dequeue(self: *@This()) !?T {
             try self.mutex.lock(self.io);
