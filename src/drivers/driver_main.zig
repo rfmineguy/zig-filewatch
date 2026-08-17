@@ -7,9 +7,10 @@ const pt = zigcli.pretty_table;
 const Table = pt.Table;
 const Cell = pt.Cell;
 const shell_action = @import("../shell_action.zig");
+const nightwatch = @import("nightwatch");
 
-const zm = @import("zigmon");
-const watcher = @import("../watcher.zig");
+// const zm = @import("zigmon");
+// const watcher = @import("../watcher.zig");
 const ConcurrentQueue = @import("../event_queue.zig").ConcurrentQueue;
 
 const U8Graph = graph.GraphWithContext([]const u8, Configuration.ConstU8Context);
@@ -180,69 +181,75 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
     }
 
     if (config.watch) {
-        var queue = try ConcurrentQueue(watcher.FileEventData).init(init.io, init.gpa);
-        defer queue.deinit();
-        var watchers = try std.ArrayList(*watcher.Watcher).initCapacity(init.gpa, 10);
-        defer {
-            for (watchers.items) |item| {
-                item.stop();
-                init.gpa.destroy(item);
-            }
-        }
-        defer watchers.deinit(init.gpa);
-        zm.init();
-        defer zm.deinit();
-
         if (zonConfig.config_data.watchers == null) return error.NoWatchersConfigured;
 
-        var dirty = false;
-        var running = true;
-        const cfg_watchers = zonConfig.config_data.watchers.?;
-        for (cfg_watchers) |cfg_watcher| {
-            const w = try init.gpa.create(watcher.Watcher);
-            errdefer init.gpa.destroy(w);
+        const Watcher = nightwatch.Create(nightwatch.default_variant);
+        const Event = union(enum) {
+            change: struct {
+                path: []const u8,
+                event: nightwatch.EventType,
+                object: nightwatch.ObjectType,
+            },
 
-            w.* = try watcher.Watcher.init(init.gpa, cfg_watcher, &queue);
-            try w.start(".");
+            rename: struct {
+                src: []const u8,
+                dst: []const u8,
+                object: nightwatch.ObjectType,
+            },
+        };
+        const H = struct {
+            handler: Watcher.Handler,
+            queue: *ConcurrentQueue(Event),
 
-            try watchers.append(init.gpa, w);
-        }
-        var changed = std.StringHashMap(watcher.FileEventData).init(init.gpa);
-        defer changed.deinit();
+            const vtable = Watcher.Handler.VTable{ .change = change, .rename = rename };
+
+            fn change(handler: *Watcher.Handler, path: []const u8, event: nightwatch.EventType, object: nightwatch.ObjectType) error{HandlerFailed}!void {
+                const self: *@This() = @fieldParentPtr("handler", handler);
+                self.queue.enqueue(.{
+                    .change = .{
+                        .path = path,
+                        .event = event,
+                        .object = object,
+                    },
+                }) catch return error.HandlerFailed;
+            }
+
+            fn rename(handler: *Watcher.Handler, src: []const u8, dst: []const u8, object: nightwatch.ObjectType) error{HandlerFailed}!void {
+                const self: *@This() = @fieldParentPtr("handler", handler);
+                self.queue.enqueue(.{
+                    .rename = .{
+                        .dst = dst,
+                        .src = src,
+                        .object = object,
+                    },
+                }) catch return error.HandlerFailed;
+            }
+        };
+        
+        var queue = try ConcurrentQueue(Event).init(init.io, init.gpa);
+        defer queue.deinit();
+        var h = H{ .queue = &queue, .handler = .{ .vtable = &H.vtable } };
+        var watcher = try nightwatch.Default.init(init.io, init.gpa, &h.handler);
+        try watcher.watch(".");
+
         while (true) {
-            defer changed.clearRetainingCapacity();
-            if (!running) try queue.wait();
-            var outputs =
-                std.StringHashMap(shell_action.CmdResult)
-                    .init(init.arena.allocator());
-            defer outputs.deinit();
-
-            while (try queue.dequeue()) |v| {
-                dirty = true;
-                try changed.put(v.file, v);
-            }
-            if (!dirty) continue;
-            try std.Io.sleep(init.io, std.Io.Duration.fromMilliseconds(100), .awake);
-            while (try queue.dequeue()) |v| {
-                try changed.put(v.file, v);
-            }
-
-            running = true;
-            dirty = false;
-
-            var it = changed.iterator();
-            while (it.next()) |pair| {
-                const event = pair.value_ptr;
-                std.debug.print("v={s}\n", .{event.file});
-                
-                const seq = event.watcher.watcher_cfg.sequence;
-                for (seq) |item| {
-                    std.debug.print("\t{any}\n", .{item});
+            try queue.wait();
+            while (try queue.dequeue()) |val| {
+                switch (val) {
+                    .change => |ch| {
+                        if (zonConfig.getSequenceForFile(init.gpa, ch.path)) |seq| {
+                            std.debug.print("{any}: {s} ({any})\n", .{ch.event, ch.path, ch.object});
+                            std.debug.print("    seq: {any}\n", .{seq});
+                        }
+                        else {
+                            std.debug.print("no sequence for {s}\n", .{ch.path});
+                        }
+                    },
+                    .rename => |rn| {
+                        std.debug.print("rename: {s} -> {s} ({any})\n", .{rn.src, rn.dst, rn.object});
+                    },
                 }
-                // try run_action(init, zonConfig, &g, null, &outputs, node.?);
             }
-
-            running = false;
         }
     }
 }

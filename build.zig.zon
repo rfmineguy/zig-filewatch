@@ -36,14 +36,21 @@
             .url = "https://github.com/xcaeser/glob.zig/archive/v0.1.0.tar.gz",
             .hash = "glob-0.1.0-AymqdJQ4AABqoaLWCtZyfQh4_bEh7c8bhffcZNp7HWsL",
         },
-        .zigmon = .{
-            .url = "git+https://github.com/rfmineguy/zigmon#4281f73f46da6956db5ec98b5ce7d356a17adc55",
-            .hash = "zigmon-0.0.1-Qy5Zt40UAQBUNUi6iVY4HPjiM7XYQx_7k2_t9BVdLNaT",
-        },
+        // .zigmon = .{
+        //     .url = "git+https://github.com/rfmineguy/zigmon#4281f73f46da6956db5ec98b5ce7d356a17adc55",
+        //     .hash = "zigmon-0.0.1-Qy5Zt40UAQBUNUi6iVY4HPjiM7XYQx_7k2_t9BVdLNaT",
+        // },
         .zigcli = .{
             .url = "git+https://github.com/jiacai2050/zigcli.git#8edd28e5f8ee4317b770a2bbb61902a88832f37f",
             .hash = "zigcli-0.6.2-ORC7jKipBgACkx_85RKXdxjINMRxJts-AmSLXMJqR2Ji",
         },
+        .nightwatch = .{
+            // This is a fork containing a small fix for the original repo
+            // https://github.com/neurocyte/nightwatch
+            .url = "git+https://github.com/rfmineguy/nightwatch.git#e7c99eeca3877055d1c3ac60bcc11def7cb8eb32",
+            .hash = "nightwatch-1.0.0-uXzeHyIAAwB0LRMQC-0sjS4ToOPl49B2QAKhlur0eiVP",
+        },
+
     },
     .paths = .{
         "build.zig",

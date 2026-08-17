@@ -1,6 +1,9 @@
 const std = @import("std");
 const zon = std.zon;
 const graph = @import("graph.zig");
+const wildmatch = @cImport(
+    @cInclude("wildmatch.h")
+);
 
 pub const SequenceEntry = union(enum) {
     action: ?[]const u8,
@@ -89,6 +92,29 @@ pub const Config = struct {
         //     std.debug.print("{s}: {any}\n", .{pair.key_ptr.*, pair.value_ptr.*});
         // }
         return config;
+    }
+    pub fn getWatcherCfgForFile(self: @This(), alloc: std.mem.Allocator, path: []const u8) ?WatcherCfg {
+        if (self.config_data.watchers) |watchers| {
+            for (watchers) |w| {
+                for (w.patterns) |pattern| {
+                    const c_pattern = std.fmt.allocPrintSentinel(alloc, "**/{s}", .{pattern}, 0) catch return null;
+                    defer alloc.free(c_pattern);
+                    std.debug.print("   trying pattern: {s}\n", .{c_pattern});
+                    const c_path = std.fmt.allocPrintSentinel(alloc, "{s}", .{path}, 0) catch return null;
+                    defer alloc.free(c_path);
+
+                    const v = wildmatch.wildmatch(c_pattern, c_path, wildmatch.WM_WILDSTAR);
+                    if (v == wildmatch.WM_MATCH) {
+                        return w;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+    pub fn getSequenceForFile(self: @This(), alloc: std.mem.Allocator, path: []const u8) ?[]SequenceEntry {
+        return if (self.getWatcherCfgForFile(alloc, path)) |cfg| cfg.sequence else null;
+
     }
     fn printZonDiagnostic(
         source: []const u8,

@@ -1,32 +1,32 @@
 const std = @import("std");
-const zm = @import("zigmon");
-const watcher = @import("../watcher.zig");
+const nightwatch = @import("nightwatch");
 const confguration = @import("../configuration.zig");
-
-const Watcher = zm.Watcher(i64);
 
 pub const Config = struct {
     root_directory: []const u8 = ".",
 };
 
 
-fn on_change(w: Watcher, action: zm.Action, path: []const u8, oldpath: ?[]const u8) void {
-    _ = action;
-    _ = oldpath;
-    std.debug.print("\nSomething happened ({}): {s}\n", .{w.data, path});
-}
-
 pub fn driver_watcher(init: std.process.Init, config: Config) !void {
-    _ = config;
-    zm.init();
-    defer zm.deinit();
 
-    const watcher_config: confguration.WatcherCfg = .{
-        .patterns = &.{ "**/*.zig" },
-        .sequence = &.{},
+    const Watcher = nightwatch.Create(nightwatch.default_variant);
+    const H = struct {
+        handler: Watcher.Handler,
+
+        const vtable = Watcher.Handler.VTable{ .change = change, .rename = rename };
+
+        fn change(_: *Watcher.Handler, path: []const u8, event: nightwatch.EventType, _: nightwatch.ObjectType) error{HandlerFailed}!void {
+            std.debug.print("{s}  {s}\n", .{ @tagName(event), path });
+        }
+
+        fn rename(_: *Watcher.Handler, src: []const u8, dst: []const u8, _: nightwatch.ObjectType) error{HandlerFailed}!void {
+            std.debug.print("rename  {s}  ->  {s}\n", .{ src, dst });
+        }
     };
-    var w = try watcher.Watcher.init(init.gpa, watcher_config, null);
-    // try w.addPattern("**/*.zig");
-    try w.start(".");
+    
+    var h = H{ .handler = .{ .vtable = &H.vtable } };
+    var watcher = try nightwatch.Default.init(init.io, init.gpa, &h.handler);
+    try watcher.watch(config.root_directory);
+
     while (true) {}
 }

@@ -23,13 +23,8 @@ pub fn build(b: *std.Build) void {
     // const glob_dep = b.dependency("glob", .{ .target = target, .optimize = optimize });
     // exe.root_module.addImport("glob", glob_dep.module("glob"));
 
-    const zigmon = b.dependency("zigmon", .{});
-    exe.root_module.addImport("zigmon", zigmon.module("zigmon"));
-
-    if (target.result.os.tag == .macos) {
-        exe.root_module.linkFramework("CoreFoundation", .{});
-        exe.root_module.linkFramework("CoreServices", .{});
-    }
+    const nightwatch = b.dependency("nightwatch", .{});
+    exe.root_module.addImport("nightwatch", nightwatch.module("nightwatch"));
 
     const zigcli = b.dependency("zigcli", .{});
     exe.root_module.addImport("zigcli", zigcli.module("zigcli"));
