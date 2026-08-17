@@ -209,13 +209,23 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
 
             try watchers.append(init.gpa, w);
         }
+        var changed = std.StringHashMap(void).init(init.gpa);
+        defer changed.deinit();
         while (true) {
-            var i: u32 = 0;
-            try std.Io.sleep(init.io, std.Io.Duration.fromSeconds(1), .awake);
-            // std.debug.print("Waiting for events\n", .{});
-            while (try queue.dequeue()) |v| : (i+=1) {
-                if (config.verbose)
-                    std.debug.print("v = {s}, i = {d}\n", .{v, i});
+            defer changed.clearRetainingCapacity();
+            try queue.wait();
+            var outputs =
+                std.StringHashMap(shell_action.CmdResult)
+                    .init(init.arena.allocator());
+            defer outputs.deinit();
+
+            while (try queue.dequeue()) |v| try changed.put(v, {});
+            try std.Io.sleep(init.io, std.Io.Duration.fromMilliseconds(100), .awake);
+            while (try queue.dequeue()) |v| try changed.put(v, {});
+
+            var it = changed.keyIterator();
+            while (it.next()) |v| {
+                std.debug.print("v={s}\n", .{v.*});
             }
         }
     }
