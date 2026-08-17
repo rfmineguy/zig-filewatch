@@ -180,7 +180,7 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
     }
 
     if (config.watch) {
-        var queue = try ConcurrentQueue([]const u8).init(init.io, init.gpa);
+        var queue = try ConcurrentQueue(watcher.FileEventData).init(init.io, init.gpa);
         defer queue.deinit();
         var watchers = try std.ArrayList(*watcher.Watcher).initCapacity(init.gpa, 10);
         defer {
@@ -194,39 +194,55 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
         defer zm.deinit();
 
         if (zonConfig.config_data.watchers == null) return error.NoWatchersConfigured;
+
+        var dirty = false;
+        var running = true;
         const cfg_watchers = zonConfig.config_data.watchers.?;
         for (cfg_watchers) |cfg_watcher| {
             const w = try init.gpa.create(watcher.Watcher);
             errdefer init.gpa.destroy(w);
 
-            w.* = try watcher.Watcher.init(init.gpa, &queue);
-
-            for (cfg_watcher.patterns) |pattern| {
-                try w.addPattern(pattern);
-            }
-
+            w.* = try watcher.Watcher.init(init.gpa, cfg_watcher, &queue);
             try w.start(".");
 
             try watchers.append(init.gpa, w);
         }
-        var changed = std.StringHashMap(void).init(init.gpa);
+        var changed = std.StringHashMap(watcher.FileEventData).init(init.gpa);
         defer changed.deinit();
         while (true) {
             defer changed.clearRetainingCapacity();
-            try queue.wait();
+            if (!running) try queue.wait();
             var outputs =
                 std.StringHashMap(shell_action.CmdResult)
                     .init(init.arena.allocator());
             defer outputs.deinit();
 
-            while (try queue.dequeue()) |v| try changed.put(v, {});
-            try std.Io.sleep(init.io, std.Io.Duration.fromMilliseconds(100), .awake);
-            while (try queue.dequeue()) |v| try changed.put(v, {});
-
-            var it = changed.keyIterator();
-            while (it.next()) |v| {
-                std.debug.print("v={s}\n", .{v.*});
+            while (try queue.dequeue()) |v| {
+                dirty = true;
+                try changed.put(v.file, v);
             }
+            if (!dirty) continue;
+            try std.Io.sleep(init.io, std.Io.Duration.fromMilliseconds(100), .awake);
+            while (try queue.dequeue()) |v| {
+                try changed.put(v.file, v);
+            }
+
+            running = true;
+            dirty = false;
+
+            var it = changed.iterator();
+            while (it.next()) |pair| {
+                const event = pair.value_ptr;
+                std.debug.print("v={s}\n", .{event.file});
+                
+                const seq = event.watcher.watcher_cfg.sequence;
+                for (seq) |item| {
+                    std.debug.print("\t{any}\n", .{item});
+                }
+                // try run_action(init, zonConfig, &g, null, &outputs, node.?);
+            }
+
+            running = false;
         }
     }
 }

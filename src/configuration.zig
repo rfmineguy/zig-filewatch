@@ -9,7 +9,7 @@ pub const SequenceEntry = union(enum) {
 
 pub const WatcherCfg = struct {
     sequence: []SequenceEntry,
-    patterns: [][]const u8,
+    patterns: []const []const u8,
 };
 
 pub const Action = struct {

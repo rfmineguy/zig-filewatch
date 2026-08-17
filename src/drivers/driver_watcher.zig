@@ -1,6 +1,7 @@
 const std = @import("std");
 const zm = @import("zigmon");
 const watcher = @import("../watcher.zig");
+const confguration = @import("../configuration.zig");
 
 const Watcher = zm.Watcher(i64);
 
@@ -20,9 +21,12 @@ pub fn driver_watcher(init: std.process.Init, config: Config) !void {
     zm.init();
     defer zm.deinit();
 
-    var w = try watcher.Watcher.init(init.gpa, null);
-    defer w.deinit();
-    try w.addPattern("**/*.zig");
+    const watcher_config: confguration.WatcherCfg = .{
+        .patterns = &.{ "**/*.zig" },
+        .sequence = &.{},
+    };
+    var w = try watcher.Watcher.init(init.gpa, watcher_config, null);
+    // try w.addPattern("**/*.zig");
     try w.start(".");
     while (true) {}
 }

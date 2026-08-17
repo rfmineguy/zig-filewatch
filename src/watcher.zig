@@ -6,32 +6,40 @@ const wildmatch = @cImport(
     @cInclude("wildmatch.h")
 );
 const event_queue = @import("event_queue.zig");
+const WatcherConfig = @import("configuration.zig").WatcherCfg;
 
 var idx: u32 = 0;
+
+pub const FileEventData = struct {
+    file: []const u8,
+    watcher: *const Watcher
+};
 
 pub const Watcher = struct {
     alloc: std.mem.Allocator,
     watcher: ZMWatcher,
-    patterns: std.ArrayList([]const u8),
+    watcher_cfg: WatcherConfig,
+    // patterns: std.ArrayList([]const u8),
     callback: ?*const fn(file: []const u8) void = null,
-    shared_queue: ?*event_queue.ConcurrentQueue([]const u8),
+    shared_queue: ?*event_queue.ConcurrentQueue(FileEventData),
     idx: u32,
-    pub fn init(alloc: std.mem.Allocator, queue: ?*event_queue.ConcurrentQueue([]const u8)) !@This() {
+    pub fn init(alloc: std.mem.Allocator, config: WatcherConfig, queue: ?*event_queue.ConcurrentQueue(FileEventData)) !@This() {
         idx += 1;
         return .{
+            .watcher_cfg = config,
             .alloc = alloc,
             .watcher = undefined,
-            .patterns = try .initCapacity(alloc, 10),
+            // .patterns = try .initCapacity(alloc, 10),
             .shared_queue = queue,
             .idx = idx,
         };
     }
-    pub fn deinit(self: *@This()) void {
-        self.patterns.deinit(self.alloc);
-    }
-    pub fn addPattern(self: *@This(), pattern: []const u8) !void {
-        try self.patterns.append(self.alloc, pattern);
-    }
+    // pub fn deinit(self: *@This()) void {
+    //     self.patterns.deinit(self.alloc);
+    // }
+    // pub fn addPattern(self: *@This(), pattern: []const u8) !void {
+    //     try self.patterns.append(self.alloc, pattern);
+    // }
 
     pub fn start(self: *@This(), root: [*c]const u8) !void {
         self.watcher = .{
@@ -42,13 +50,13 @@ pub const Watcher = struct {
         };
         try self.watcher.watch();
         std.debug.print("Started watcher {d} with patterns:", .{self.idx});
-        for (self.patterns.items) |p| std.debug.print("{s}, ", .{p});
+        for (self.watcher_cfg.patterns) |p| std.debug.print("{s}, ", .{p});
         std.debug.print("\n", .{});
     }
 
     pub fn stop(self: *@This()) void {
         self.watcher.unwatch();
-        std.debug.print("Stopped watcher with patterns: {}\n", .{self.patterns});
+        std.debug.print("Stopped watcher with patterns: {any}\n", .{self.watcher_cfg.patterns});
     }
 
     pub fn on_change(watcher: ZMWatcher, action: zm.Action, path: []const u8, oldpath: ?[]const u8) void {
@@ -60,7 +68,7 @@ pub const Watcher = struct {
             // for (self.patterns.items) |p| std.debug.print("{s}, ", .{p});
             const c_path = std.fmt.allocPrintSentinel(self.alloc, "{s}", .{path}, 0) catch "error";
             defer self.alloc.free(c_path);
-            for (self.patterns.items) |pattern| {
+            for (self.watcher_cfg.patterns) |pattern| {
                 const c_pattern = std.fmt.allocPrintSentinel(self.alloc, "{s}", .{pattern}, 0) catch "error";
                 defer self.alloc.free(c_pattern);
                 // std.debug.print("matching {s} with {s}\n", .{path, pattern});
@@ -69,7 +77,7 @@ pub const Watcher = struct {
                     if (self.shared_queue) |q| {
                         const owned = self.alloc.dupe(u8, path) catch return;
                         errdefer self.alloc.free(owned);
-                        q.enqueue(owned) catch return;
+                        q.enqueue(.{ .watcher = self, .file = owned}) catch return;
                     }
                     // std.debug.print("{s} matched {s}\n", .{path, pattern});
                 }
