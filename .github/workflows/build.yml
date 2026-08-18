@@ -24,6 +24,15 @@ jobs:
         with:
           version: 0.16.0
 
+      - name: Check C compiler
+        run: |
+          zig version
+          zig cc --version
+          zig cc -E -x c - <<'EOF'
+          #include <ctype.h>
+          int main(void) {}
+          EOF
+
       - name: Run tests
         run: zig build test
 
