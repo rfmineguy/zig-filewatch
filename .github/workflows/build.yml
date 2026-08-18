@@ -25,13 +25,12 @@ jobs:
           version: 0.16.0
 
       - name: Check C compiler
+        shell: bash
         run: |
           zig version
           zig cc --version
-          zig cc -E -x c - <<'EOF'
-          #include <ctype.h>
-          int main(void) {}
-          EOF
+          printf '#include <ctype.h>\nint main(void) {}\n' > test.c
+          zig cc -E test.c
 
       - name: Run tests
         run: zig build test
