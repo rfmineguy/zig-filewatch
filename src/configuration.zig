@@ -99,7 +99,6 @@ pub const Config = struct {
                 for (w.patterns) |pattern| {
                     const c_pattern = std.fmt.allocPrintSentinel(alloc, "**/{s}", .{pattern}, 0) catch return null;
                     defer alloc.free(c_pattern);
-                    std.debug.print("   trying pattern: {s}\n", .{c_pattern});
                     const c_path = std.fmt.allocPrintSentinel(alloc, "{s}", .{path}, 0) catch return null;
                     defer alloc.free(c_path);
 
