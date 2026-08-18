@@ -8,6 +8,7 @@ const Table = pt.Table;
 const Cell = pt.Cell;
 const shell_action = @import("../shell_action.zig");
 const nightwatch = @import("nightwatch");
+const runbatch = @import("../runBatch.zig");
 
 // const zm = @import("zigmon");
 // const watcher = @import("../watcher.zig");
@@ -86,6 +87,39 @@ fn show_cycles(init: std.process.Init, cycles: std.ArrayList(std.ArrayList([]con
     var writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     try writer.interface.print("{f}", .{table});
     try writer.interface.flush();
+}
+
+fn run_sequence(init: std.process.Init, zoncfg: ZigFilewatchConfig, g: *U8Graph, seq: []Configuration.SequenceEntry, output_map: *std.StringHashMap(shell_action.CmdResult), node: std.Progress.Node) !void {
+    const n = node.start(seq.len);
+    defer n.end();
+    for (seq) |seq_item| {
+        switch (seq_item) {
+            .shell => |s| {
+                var parts = std.ArrayList([]const u8).empty;
+                errdefer parts.deinit(init.gpa);
+
+                var it = std.mem.tokenizeScalar(u8, s.?, ' ');
+                while (it.next()) |part| try parts.append(init.gpa, part);
+
+                const argv = try parts.toOwnedSlice(init.gpa);
+                defer init.gpa.free(argv);
+
+                const shell_node = n.start(argv[0], 1);
+                defer shell_node.end();
+                var shell = shell_action.ShellAction.init(init.gpa, init.io, argv);
+                defer shell.deinit();
+                const result = try shell.execute();
+                shell_node.completeOne();
+                try output_map.put(argv[0], result);
+            },
+            .action => |a| {
+                if (zoncfg.actions_map.get(a.?)) |action| {
+                    try run_sequence(init, zoncfg, g, action.sequence, output_map, n);
+                }
+            },
+        }
+        n.completeOne();
+    }
 }
 
 fn run_action(init: std.process.Init, zoncfg: ZigFilewatchConfig, g: *U8Graph, action_name: []const u8, output_map: *std.StringHashMap(shell_action.CmdResult), node: std.Progress.Node) !void {
@@ -182,6 +216,13 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
 
     if (config.watch) {
         if (zonConfig.config_data.watchers == null) return error.NoWatchersConfigured;
+        if (g.detectCycles()) |cycles| {
+            if (cycles.items.len != 0) {
+                try show_cycles(init, cycles);
+                std.debug.print("Error: can't run with cycles present\n", .{});
+                return;
+            }
+        }
 
         const Watcher = nightwatch.Create(nightwatch.default_variant);
         const Event = union(enum) {
@@ -228,26 +269,46 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
         
         var queue = try ConcurrentQueue(Event).init(init.io, init.gpa);
         defer queue.deinit();
+
+        std.debug.print("Starting watcher...\n", .{});
         var h = H{ .queue = &queue, .handler = .{ .vtable = &H.vtable } };
         var watcher = try nightwatch.Default.init(init.io, init.gpa, &h.handler);
         try watcher.watch(".");
+        std.debug.print("Started watcher...\n", .{});
 
+        var runBatch = try runbatch.RunBatch(Event).init(init.gpa, init.io);
+        defer runBatch.deinit();
+
+        const progress = std.Progress.start(init.io, .{});
+        defer progress.end();
         while (true) {
-            try queue.wait();
-            while (try queue.dequeue()) |val| {
-                switch (val) {
+            var outputs = std.StringHashMap(shell_action.CmdResult).init(init.arena.allocator());
+            defer outputs.deinit();
+            try runBatch.next(&queue);
+            defer runBatch.end();
+
+            if (try runBatch.empty()) continue;
+
+            const node = progress.start("watch", runBatch.events.items.len);
+            defer node.end();
+
+            for (runBatch.events.items) |event| {
+                switch (event) {
                     .change => |ch| {
-                        if (zonConfig.getSequenceForFile(init.gpa, ch.path)) |seq| {
-                            std.debug.print("{any}: {s} ({any})\n", .{ch.event, ch.path, ch.object});
-                            std.debug.print("    seq: {any}\n", .{seq});
-                        }
-                        else {
-                            std.debug.print("no sequence for {s}\n", .{ch.path});
+                        const seq = zonConfig.getSequenceForFile(init.gpa, ch.path) orelse continue;
+                        for (seq) |item| {
+                            switch (item) {
+                                .action => |action| {
+                                    run_action(init, zonConfig, &g, action.?, &outputs, node) catch std.debug.print("Error running action {s}\n", .{action.?});
+                                },
+                                .shell => |shell| {
+                                    _ = shell;
+                                }
+                            }
+                            node.completeOne();
                         }
                     },
-                    .rename => |rn| {
-                        std.debug.print("rename: {s} -> {s} ({any})\n", .{rn.src, rn.dst, rn.object});
-                    },
+                    .rename => |rn| { _ = rn; },
                 }
             }
         }
