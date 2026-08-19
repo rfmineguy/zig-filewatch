@@ -10,6 +10,10 @@ const shell_action = @import("../shell_action.zig");
 const nightwatch = @import("nightwatch");
 const runbatch = @import("../runBatch.zig");
 
+const ProcessTree = @import("../process_tree.zig").ProcessTree;
+const Process = @import("../process.zig").Process;
+const process_events = @import("../process_events.zig");
+
 // const zm = @import("zigmon");
 // const watcher = @import("../watcher.zig");
 const ConcurrentQueue = @import("../event_queue.zig").ConcurrentQueue;
@@ -24,8 +28,32 @@ pub const Config = struct {
     watch: bool = false,
     verbose: bool = false,
 
+    // the following apply to --watch mode
+    //   0 - root, 1 - action, 2 - shell
+    __internal_mode: ?u32 = 0,
+    //   if __internal_mode is 1, this should have a value
+    __internal__run: ?[]const u8 = null,
+    /// These are passed only between filewatch's managed processes.  The FD is
+    /// inherited across exec, so nested actions can report to the same root.
+    __internal_event_fd: ?std.posix.fd_t = null,
+    __internal_process_id: ?u64 = null,
+
     pub const __messages__ = .{};
 };
+
+fn eventReader(fd: std.posix.fd_t, queue: *ConcurrentQueue(process_events.Event)) void {
+    while (true) {
+        var bytes: [process_events.Event.wire_len]u8 = undefined;
+        var offset: usize = 0;
+        while (offset < bytes.len) {
+            const count = std.c.read(fd, bytes[offset..].ptr, bytes.len - offset);
+            if (count <= 0) return;
+            offset += @intCast(count);
+        }
+        const event = process_events.Event.decode(&bytes) catch continue;
+        queue.enqueue(event) catch return;
+    }
+}
 
 const ConstU8Context = struct {
     pub fn hash(_: @This(), key: []const u8) u64 {
@@ -215,102 +243,150 @@ pub fn driver_main(init: std.process.Init, config: Config) !void {
     }
 
     if (config.watch) {
-        if (zonConfig.config_data.watchers == null) return error.NoWatchersConfigured;
-        if (g.detectCycles()) |cycles| {
-            if (cycles.items.len != 0) {
-                try show_cycles(init, cycles);
-                std.debug.print("Error: can't run with cycles present\n", .{});
-                return;
+        // TODO
+        //   We are moving to a process tree oriented architecture, where a parent waits on its children before marking as finished
+        //    - this allows us to cleanly kill a process and its children when a new watch event comes through
+        //    - this also may allow us to more easily implement concurrent actions
+        //    - progress would be tracked simply by waiting for the process handle to exit, and reporting its status
+        //    - children notify root of new what's going on
+        //
+        //   root
+        //    \__ build_zig             (action)
+        //        \__ zig build         (shell)
+        //
+        // root
+        if (config.__internal_mode == 0) {
+            if (zonConfig.config_data.watchers == null) return error.NoWatchersConfigured;
+            if (g.detectCycles()) |cycles| {
+                if (cycles.items.len != 0) {
+                    try show_cycles(init, cycles);
+                    std.debug.print("Error: can't run with cycles present\n", .{});
+                    return;
+                }
             }
-        }
+            const Watcher = nightwatch.Create(nightwatch.default_variant);
+            var arg_it = std.process.Args.Iterator.init(init.minimal.args);
+            const executable = arg_it.next() orelse return error.MissingExecutablePath;
+            const Event = union(enum) {
+                change: struct {
+                    path: []const u8,
+                    event: nightwatch.EventType,
+                    object: nightwatch.ObjectType,
+                },
 
-        const Watcher = nightwatch.Create(nightwatch.default_variant);
-        const Event = union(enum) {
-            change: struct {
-                path: []const u8,
-                event: nightwatch.EventType,
-                object: nightwatch.ObjectType,
-            },
+                rename: struct {
+                    src: []const u8,
+                    dst: []const u8,
+                    object: nightwatch.ObjectType,
+                },
+            };
+            const H = struct {
+                handler: Watcher.Handler,
+                queue: *ConcurrentQueue(Event),
 
-            rename: struct {
-                src: []const u8,
-                dst: []const u8,
-                object: nightwatch.ObjectType,
-            },
-        };
-        const H = struct {
-            handler: Watcher.Handler,
-            queue: *ConcurrentQueue(Event),
+                const vtable = Watcher.Handler.VTable{ .change = change, .rename = rename };
 
-            const vtable = Watcher.Handler.VTable{ .change = change, .rename = rename };
+                fn change(handler: *Watcher.Handler, path: []const u8, event: nightwatch.EventType, object: nightwatch.ObjectType) error{HandlerFailed}!void {
+                    const self: *@This() = @fieldParentPtr("handler", handler);
+                    self.queue.enqueue(.{
+                        .change = .{
+                            .path = path,
+                            .event = event,
+                            .object = object,
+                        },
+                    }) catch return error.HandlerFailed;
+                }
 
-            fn change(handler: *Watcher.Handler, path: []const u8, event: nightwatch.EventType, object: nightwatch.ObjectType) error{HandlerFailed}!void {
-                const self: *@This() = @fieldParentPtr("handler", handler);
-                self.queue.enqueue(.{
-                    .change = .{
-                        .path = path,
-                        .event = event,
-                        .object = object,
-                    },
-                }) catch return error.HandlerFailed;
-            }
+                fn rename(handler: *Watcher.Handler, src: []const u8, dst: []const u8, object: nightwatch.ObjectType) error{HandlerFailed}!void {
+                    const self: *@This() = @fieldParentPtr("handler", handler);
+                    self.queue.enqueue(.{
+                        .rename = .{
+                            .dst = dst,
+                            .src = src,
+                            .object = object,
+                        },
+                    }) catch return error.HandlerFailed;
+                }
+            };
 
-            fn rename(handler: *Watcher.Handler, src: []const u8, dst: []const u8, object: nightwatch.ObjectType) error{HandlerFailed}!void {
-                const self: *@This() = @fieldParentPtr("handler", handler);
-                self.queue.enqueue(.{
-                    .rename = .{
-                        .dst = dst,
-                        .src = src,
-                        .object = object,
-                    },
-                }) catch return error.HandlerFailed;
-            }
-        };
+            var process_tree = try ProcessTree.init(init.gpa);
+            defer process_tree.deinit();
         
-        var queue = try ConcurrentQueue(Event).init(init.io, init.gpa);
-        defer queue.deinit();
+            var queue = try ConcurrentQueue(Event).init(init.io, init.gpa);
+            defer queue.deinit();
+            var event_queue = try ConcurrentQueue(process_events.Event).init(init.io, init.gpa);
+            defer event_queue.deinit();
 
-        std.debug.print("Starting watcher...\n", .{});
-        var h = H{ .queue = &queue, .handler = .{ .vtable = &H.vtable } };
-        var watcher = try nightwatch.Default.init(init.io, init.gpa, &h.handler);
-        try watcher.watch(".");
-        std.debug.print("Started watcher...\n", .{});
+            var event_fds: [2]std.posix.fd_t = undefined;
+            if (std.c.pipe(&event_fds) != 0) return error.EventPipeFailed;
+            defer _ = std.posix.system.close(event_fds[0]);
+            defer _ = std.posix.system.close(event_fds[1]);
+            const reader_thread = try std.Thread.spawn(.{}, eventReader, .{ event_fds[0], &event_queue });
+            reader_thread.detach();
 
-        var runBatch = try runbatch.RunBatch(Event).init(init.gpa, init.io);
-        defer runBatch.deinit();
+            std.debug.print("Starting watcher...\n", .{});
+            var h = H{ .queue = &queue, .handler = .{ .vtable = &H.vtable } };
+            var watcher = try nightwatch.Default.init(init.io, init.gpa, &h.handler);
+            try watcher.watch(".");
+            std.debug.print("Started watcher...\n", .{});
 
-        const progress = std.Progress.start(init.io, .{});
-        defer progress.end();
-        while (true) {
-            var outputs = std.StringHashMap(shell_action.CmdResult).init(init.arena.allocator());
-            defer outputs.deinit();
-            try runBatch.next(&queue);
-            defer runBatch.end();
-
-            if (try runBatch.empty()) continue;
-
-            const node = progress.start("watch", runBatch.events.items.len);
-            defer node.end();
-
-            for (runBatch.events.items) |event| {
-                switch (event) {
-                    .change => |ch| {
-                        const seq = zonConfig.getSequenceForFile(init.gpa, ch.path) orelse continue;
-                        for (seq) |item| {
-                            switch (item) {
-                                .action => |action| {
-                                    run_action(init, zonConfig, &g, action.?, &outputs, node) catch std.debug.print("Error running action {s}\n", .{action.?});
-                                },
-                                .shell => |shell| {
-                                    _ = shell;
-                                }
-                            }
-                            node.completeOne();
-                        }
-                    },
-                    .rename => |rn| { _ = rn; },
+            while (true) {
+                while (try event_queue.dequeue()) |event| {
+                    const state: Process.State = switch (event.kind) {
+                        .started => .running,
+                        .finished => .finished,
+                        .failed => .failed,
+                        .cancelled => .cancelled,
+                    };
+                    process_tree.handleEvent(event.process_id, state);
+                    std.debug.print("{s} process {d} (status {d})\n", .{ @tagName(event.kind), event.process_id, event.status });
+                }
+                while (try queue.dequeue()) |event| {
+                    const sequence = switch (event) {
+                        .change => |change| zonConfig.getSequenceForFile(init.arena.allocator(), change.path),
+                        .rename => |rename| zonConfig.getSequenceForFile(init.arena.allocator(), rename.dst),
+                    } orelse continue;
+                    for (sequence) |entry| {
+                        const action = switch (entry) {
+                            .action => |name| name orelse continue,
+                            // Shell entries deliberately stay inside an action process. A
+                            // watcher sequence should name an action so it can be cancelled.
+                            .shell => continue,
+                        };
+                        try process_tree.cancel(action);
+                        const process_id = process_tree.nextId();
+                        const fd_text = try std.fmt.allocPrint(init.arena.allocator(), "{d}", .{event_fds[1]});
+                        const id_text = try std.fmt.allocPrint(init.arena.allocator(), "{d}", .{process_id});
+                        const argv = [_][]const u8{
+                            executable, "driver_main", "--file", config.file, "--watch",
+                            "--__internal_mode", "1", "--__internal__run", action,
+                            "--__internal_event_fd", fd_text, "--__internal_process_id", id_text,
+                        };
+                        _ = try process_tree.spawn(init, null, action, &argv);
+                    }
                 }
             }
         }
+        // action
+        else if (config.__internal_mode == 1) {
+            const action = config.__internal__run orelse return error.MissingInternalAction;
+            const fd = config.__internal_event_fd orelse return error.MissingEventPipe;
+            const process_id = config.__internal_process_id orelse return error.MissingProcessId;
+            try process_events.write(fd, .{ .kind = .started, .process_id = process_id });
+            var outputs = std.StringHashMap(shell_action.CmdResult).init(init.arena.allocator());
+            defer outputs.deinit();
+            var progress = std.Progress.start(init.io, .{ .root_name = action });
+            defer progress.end();
+            run_action(init, zonConfig, &g, action, &outputs, progress) catch |err| {
+                process_events.write(fd, .{ .kind = .failed, .process_id = process_id, .status = -1 }) catch {};
+                return err;
+            };
+            try process_events.write(fd, .{ .kind = .finished, .process_id = process_id });
+        }
+        // shell
+        else if (config.__internal_mode == 2) {
+        }
+        // unknown
+        else unreachable;
     }
 }

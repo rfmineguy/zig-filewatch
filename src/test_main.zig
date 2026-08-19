@@ -7,6 +7,6 @@ pub fn main(init: std.process.Init) !u8 {
     while (it.next()) |arg| std.debug.print("{s}, ", .{arg});
     std.debug.print("]\n", .{});
 
-    try std.Io.sleep(init.io, std.Io.Duration.fromMilliseconds(4), .awake);
+    try std.Io.sleep(init.io, std.Io.Duration.fromSeconds(4), .awake);
     return 1;
 }
